@@ -16,6 +16,10 @@ namespace Infrastructure
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+
+            base.OnModelCreating(modelBuilder);
+            DbSeeder.Seed(modelBuilder);
+
             modelBuilder.Entity<ChatUser>().
                 HasKey(chatUser => new { chatUser.UserId, chatUser.ChatId });
 

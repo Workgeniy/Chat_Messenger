@@ -75,6 +75,22 @@ namespace Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Chats");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsGroup = false,
+                            Name = "Alice & Bob"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsGroup = true,
+                            Name = "General Chat"
+                        });
                 });
 
             modelBuilder.Entity("Core.Entities.ChatUser", b =>
@@ -96,6 +112,36 @@ namespace Infrastructure.Migrations
                     b.HasIndex("ChatId");
 
                     b.ToTable("ChatUsers");
+
+                    b.HasData(
+                        new
+                        {
+                            UserId = 1,
+                            ChatId = 1,
+                            Created = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsAdmin = false
+                        },
+                        new
+                        {
+                            UserId = 2,
+                            ChatId = 1,
+                            Created = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsAdmin = false
+                        },
+                        new
+                        {
+                            UserId = 1,
+                            ChatId = 2,
+                            Created = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsAdmin = true
+                        },
+                        new
+                        {
+                            UserId = 2,
+                            ChatId = 2,
+                            Created = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsAdmin = false
+                        });
                 });
 
             modelBuilder.Entity("Core.Entities.Message", b =>
@@ -133,6 +179,32 @@ namespace Infrastructure.Migrations
                     b.HasIndex("SenderId");
 
                     b.ToTable("Messages");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            ChatId = 1,
+                            Content = "Привет, Боб!",
+                            SenderId = 1,
+                            Sent = new DateTime(2023, 12, 31, 23, 50, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 2,
+                            ChatId = 1,
+                            Content = "Привет, Алиса! Как дела?",
+                            SenderId = 2,
+                            Sent = new DateTime(2023, 12, 31, 23, 51, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 3,
+                            ChatId = 2,
+                            Content = "Добро пожаловать в общий чат!",
+                            SenderId = 1,
+                            Sent = new DateTime(2023, 12, 31, 23, 55, 0, 0, DateTimeKind.Utc)
+                        });
                 });
 
             modelBuilder.Entity("Core.Entities.User", b =>
@@ -155,6 +227,18 @@ namespace Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Users");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Name = "Alice"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Name = "Bob"
+                        });
                 });
 
             modelBuilder.Entity("Core.Entities.Attachment", b =>
@@ -177,7 +261,7 @@ namespace Infrastructure.Migrations
                         .IsRequired();
 
                     b.HasOne("Core.Entities.User", "User")
-                        .WithMany()
+                        .WithMany("ChatUsers")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -222,6 +306,11 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Core.Entities.Message", b =>
                 {
                     b.Navigation("Attachments");
+                });
+
+            modelBuilder.Entity("Core.Entities.User", b =>
+                {
+                    b.Navigation("ChatUsers");
                 });
 #pragma warning restore 612, 618
         }

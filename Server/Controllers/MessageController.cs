@@ -49,7 +49,16 @@ namespace Server.Controllers
                 await context.SaveChangesAsync();
             }
 
-            return Ok(new { message.Id });
+            return Ok(new MessageDTO
+            {
+                Id = message.Id,
+                ChatId = message.ChatId,
+                SenderId= message.SenderId,
+                Content= message.Content,
+                SentAt = message.Sent,
+                ReplyToMessageId = message.ReplyToMessageId,
+                Attachments = dto.Attachments ?? new List<AttachmentDto>()
+            });
         }
 
         [HttpGet("chat/{chatId}")]
