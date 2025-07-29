@@ -11,5 +11,7 @@ namespace Core.DTO
         public string FileName { get; set; }
         public string MimeType { get; set; }
         public long FileSize { get; set; }
+        public string FilePath {  get; set; }
+        public string? ThumbnailPath { get; set; }
     }
 }
