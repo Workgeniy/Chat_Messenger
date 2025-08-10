@@ -1,82 +1,94 @@
-﻿using Core.DTO;
-using Core.Entities;
-using Infrastructure;
+﻿using Infrastructure;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Server.Hubs;
 
-namespace Server.Controllers
+namespace Server.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class MessagesController : ControllerBase
 {
+    private readonly AppDbContext _db;
+    private readonly IHubContext<ChatHub> _hub;
 
-    [ApiController]
-    [Route("api/[controller]")]
-    public class MessageController : ControllerBase
+    public MessagesController(AppDbContext db, IHubContext<ChatHub> hub)
     {
-        private readonly AppDbContext context;
+        _db = db;
+        _hub = hub;
+    }
 
-        public MessageController(AppDbContext context)
-        {
-            this.context = context; 
-        }
+    // GET /api/messages?chatId=1&before=2025-08-10T10:00:00Z&take=50
+    [HttpGet]
+    public async Task<IActionResult> Get([FromQuery] int chatId, [FromQuery] DateTime? before, [FromQuery] int take = 50)
+    {
+        var q = _db.Messages.AsNoTracking().Where(m => m.ChatId == chatId);
+        if (before.HasValue) q = q.Where(m => m.Sent < before.Value.ToUniversalTime());
 
-        [HttpPost]
-        public async Task<IActionResult> SendMessage([FromBody] MessageDTO dto){
-
-            Message? message = new Message {
-                ChatId = dto.ChatId,
-                SenderId = dto.SenderId,
-                Content = dto.Content,
-                Sent = DateTime.UtcNow,
-                ReplyToMessageId = dto.ReplyToMessageId,
-            };
-
-            context.Messages.Add(message);
-            await context.SaveChangesAsync();
-
-            if (dto.Attachments != null && dto.Attachments.Any())
+        var list = await q
+            .OrderBy(m => m.Sent)
+            .Take(take)
+            .Select(m => new
             {
-                foreach (var attachmentDto in dto.Attachments)
-                {
-                    var attachment = new Attachment
-                    {
-                        MessageId = message.Id,
-                        FileName = attachmentDto.FileName,
-                        MimeType = attachmentDto.MimeType,
-                        FileSize = attachmentDto.FileSize
-                    };
-                    context.Attachments.Add(attachment);
-                }
+                id = m.Id,
+                chatId = m.ChatId,
+                text = m.Content,
+                senderId = m.SenderId,
+                sentUtc = DateTime.SpecifyKind(m.Sent, DateTimeKind.Utc),
+                attachments = m.Attachments.Select(a => new {
+                    id = a.Id,
+                    contentType = a.MimeType
+                }).ToList()
+            })
+            .ToListAsync();
 
-                await context.SaveChangesAsync();
-            }
+        return Ok(list);
+    }
 
-            return Ok(new { message.Id });
-        }
+    public class SendMessageDto
+    {
+        public int ChatId { get; set; }
+        public string? Text { get; set; }
+        public List<string>? Attachments { get; set; } // ids, если используешь загрузку
+    }
 
-        [HttpGet("chat/{chatId}")]
-        public async Task<IActionResult> GetMessagesByChatId(int chatId)
+    // POST /api/messages
+    [HttpPost]
+    public async Task<IActionResult> Post([FromBody] SendMessageDto dto)
+    {
+        var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+
+        var exists = await _db.Chats.AnyAsync(c => c.Id == dto.ChatId);
+        if (!exists) return NotFound("Chat not found");
+
+        var msg = new Core.Entities.Message
         {
-            var message = await context.Messages
-                .Include(attachment => attachment.Attachments)
-                .Where(id => id.ChatId == chatId)
-                .OrderBy(sent => sent.Sent)
-                .Select(dto => new MessageDTO
-                {
-                    Id = dto.Id,
-                    ChatId = dto.ChatId,
-                    SenderId = dto.SenderId,
-                    Content = dto.Content,
-                    SentAt = dto.Sent,
-                    ReplyToMessageId = dto.ReplyToMessageId,
-                    Attachments = dto.Attachments.Select(attachment => new AttachmentDto
-                    {
-                        FileName = attachment.FileName,
-                        MimeType = attachment.MimeType,
-                        FileSize = attachment.FileSize
-                    }).ToList()
-                }).ToListAsync();
+            ChatId = dto.ChatId,
+            SenderId = userId,
+            Content = dto.Text,
+            Sent = DateTime.UtcNow
+        };
+        _db.Messages.Add(msg);
+        await _db.SaveChangesAsync();
 
-            return Ok(message);
-        }
+        // Если у тебя есть таблица Attachments и upload — тут можно привязать их к msg.Id по dto.Attachments
 
+        var payload = new
+        {
+            id = msg.Id,
+            chatId = msg.ChatId,
+            text = msg.Content,
+            senderId = msg.SenderId,
+            sentUtc = DateTime.SpecifyKind(msg.Sent, DateTimeKind.Utc),
+            attachments = Array.Empty<object>()
+        };
+
+        // рассылаем всем участникам чата (группа "chat:{id}")
+        await _hub.Clients.Group($"chat:{dto.ChatId}").SendAsync("MessageCreated", payload);
+
+        return Ok(payload);
     }
 }
