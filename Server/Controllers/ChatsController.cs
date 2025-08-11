@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Server.Controllers;
 
@@ -11,26 +12,54 @@ namespace Server.Controllers;
 public class ChatsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public ChatsController(AppDbContext db) => _db = db;
+    public ChatsController(AppDbContext db) { _db = db; }
 
     [HttpGet]
-    public async Task<IActionResult> GetMyChats()
+    public async Task<IActionResult> My()
     {
-        var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-        // Если в Chat поле называется Name — маппим его в Title
-        var chats = await _db.ChatUsers
+        var items = await _db.ChatUsers
             .AsNoTracking()
-            .Include(cu => cu.Chat)
-            .Where(cu => cu.UserId == userId)
+            .Where(cu => cu.UserId == me)
             .Select(cu => new
             {
-                id = cu.Chat.Id,
-                title = cu.Chat.Name,
-                unread = 0
+                ChatId = cu.ChatId,
+                ChatName = cu.Chat.Name,
+                // подтянем участников
+                Members = cu.Chat.ChatUsers.Select(x => new { x.User.Id, x.User.Name, x.User.AvatarUrl })
             })
             .ToListAsync();
 
-        return Ok(chats);
+        var result = items.Select(x =>
+        {
+            var members = x.Members.ToList();
+            var isGroup = members.Count != 2;
+            string title;
+            string? avatar = null;
+
+            if (isGroup)
+            {
+                title = x.ChatName ?? "Группа";
+                // при желании: групповой аватар из Chat.AvatarUrl
+            }
+            else
+            {
+                var peer = members.First(m => m.Id != me);
+                title = peer.Name ?? $"User#{peer.Id}";
+                avatar = peer.AvatarUrl;
+            }
+
+            return new
+            {
+                id = x.ChatId,
+                title,
+                avatarUrl = avatar,
+                isGroup
+            };
+        });
+
+        return Ok(result);
     }
 }
+

@@ -23,5 +23,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../../../AppData/Local/JetBrains/WebStorm2025.2/javascript/typings/node/22.17.1/node_modules/@types/node/module.d.ts"
+  ]
 }

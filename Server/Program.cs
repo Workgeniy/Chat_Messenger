@@ -109,8 +109,8 @@ static async Task SeedDemoDataAsync(AppDbContext db)
         {
             // если у тебя поле называется Name — оставь Name; если Title — заполни Title
             Name = "Диалог",  // или Title = "Диалог"
-            // Created = DateTime.UtcNow, // если есть такое поле
-            // IsGroup = false            // если есть такое поле
+            Created = DateTime.UtcNow, // если есть такое поле
+            IsGroup = false            // если есть такое поле
         };
         db.Chats.Add(chat);
         await db.SaveChangesAsync();
@@ -141,9 +141,11 @@ if (app.Environment.IsDevelopment())
 
 // Без HTTPS в dev
 app.UseCors("AllowDev");
+app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+
 
 app.MapControllers();
 app.MapHub<ChatHub>("/chatHub");

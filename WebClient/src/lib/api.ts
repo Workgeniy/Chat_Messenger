@@ -1,3 +1,5 @@
+export type Chat = { id: number; title: string; avatarUrl?: string; isGroup: boolean };
+
 const API = import.meta.env.VITE_API_BASE; // например, "/api"
 
 export type LoginResp = { token: string; userId: number; displayName: string };
@@ -33,20 +35,81 @@ export const api = {
     },
 
     myChats() {
-        return http<Array<{ id:number; title:string; unread:number }>>(`/chats`);
+        return http<Chat[]>(`/chats`);
     },
-
     messages: (chatId: number, before?: string) =>
-        http<Array<{ id:number; chatId:number; text:string; senderId:number; sentUtc:string }>>(
+        http<Array<{ id:number; chatId:number; text:string; senderId:number; sentUtc:string;
+            attachments?: Array<{ id:number|string; url?:string; contentType?:string }> }>>(
             `/messages?chatId=${chatId}${before ? `&before=${before}` : ""}&take=50`
         ),
 
-    sendMessage: (chatId: number, text: string, attachments?: string[]) =>
+    // тут была ошибка: стояло /api/messages -> давало /api/api/messages
+    sendMessage: (chatId: number, text: string, attachments?: number[]) =>
         http(`/messages`, { method: "POST", body: JSON.stringify({ chatId, text, attachments }) }),
 
+    // id у нас number (PK в БД), не string
     upload: (file: File) => {
         const form = new FormData();
         form.append("file", file);
-        return http<{ id: string; url?: string }>(`/attachments`, { method: "POST", body: form });
+        return http<{ id: number; url?: string }>(`/attachments`, { method: "POST", body: form });
+    },
+
+    logout() {
+        token = null;
+        localStorage.removeItem("token");
+        localStorage.removeItem("userId");
+        localStorage.removeItem("name");
+    },
+
+    me() {
+        return http<{ id:number; name:string; email:string; avatarUrl?:string }>(`/users/me`);
+    },
+
+    updateMe(data: { name?:string; email?:string; password?:string }) {
+        return http(`/users/me`, { method: "PUT", body: JSON.stringify(data) });
+    },
+
+    uploadAvatar(file: File) {
+        const form = new FormData();
+        form.append("file", file);
+        return http<{ avatarUrl: string }>(`/users/me/avatar`, { method: "POST", body: form });
+    },
+
+    searchUsers(query: string) {
+        return http<Array<{ id:number; name:string; email?:string; avatarUrl?:string }>>(
+            `/users/search?query=${encodeURIComponent(query)}`
+        );
     }
 };
+
+export async function uploadWithProgress(
+    file: File,
+    onProgress?: (p: number) => void
+): Promise<{ id: number; url?: string }> {
+    const tokenHdr = token ? `Bearer ${token}` : localStorage.getItem("token") ? `Bearer ${localStorage.getItem("token")}` : "";
+    return await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API}/attachments`, true);
+        if (tokenHdr) xhr.setRequestHeader("Authorization", tokenHdr);
+
+        xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable && onProgress) {
+                onProgress(Math.max(0, Math.min(100, Math.round((ev.loaded / ev.total) * 100))));
+            }
+        };
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try { resolve(JSON.parse(xhr.responseText)); }
+                catch { reject(new Error("Bad JSON from server")); }
+            } else {
+                reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
+            }
+        };
+        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.onabort = () => reject(new Error("Upload aborted"));
+
+        const form = new FormData();
+        form.append("file", file);
+        xhr.send(form);
+    });
+}

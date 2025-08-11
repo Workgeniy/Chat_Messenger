@@ -13,6 +13,7 @@ namespace Infrastructure
             public DbSet<ChatUser> ChatUsers => Set<ChatUser>();
             public DbSet<Message> Messages => Set<Message>();
             public DbSet<Attachment> Attachments => Set<Attachment>();
+            public DbSet<AttachmentVariant> AttachmentVariants => Set<AttachmentVariant>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

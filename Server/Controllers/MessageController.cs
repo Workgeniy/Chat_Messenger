@@ -1,9 +1,12 @@
-﻿using Infrastructure;
+﻿using Core.Entities;
+using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Server.Hubs;
+using System.Linq;
+using Core.DTO;
 
 namespace Server.Controllers;
 
@@ -21,16 +24,21 @@ public class MessagesController : ControllerBase
         _hub = hub;
     }
 
-    // GET /api/messages?chatId=1&before=2025-08-10T10:00:00Z&take=50
+    [Authorize]
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int chatId, [FromQuery] DateTime? before, [FromQuery] int take = 50)
     {
-        var q = _db.Messages.AsNoTracking().Where(m => m.ChatId == chatId);
-        if (before.HasValue) q = q.Where(m => m.Sent < before.Value.ToUniversalTime());
+        var q = _db.Messages
+            .AsNoTracking()
+            .Where(m => m.ChatId == chatId);
+
+        if (before.HasValue)
+            q = q.Where(m => m.Sent < before.Value);
 
         var list = await q
-            .OrderBy(m => m.Sent)
+            .OrderByDescending(m => m.Sent)
             .Take(take)
+            .OrderBy(m => m.Sent) // вернуть по возрастанию
             .Select(m => new
             {
                 id = m.Id,
@@ -38,8 +46,10 @@ public class MessagesController : ControllerBase
                 text = m.Content,
                 senderId = m.SenderId,
                 sentUtc = DateTime.SpecifyKind(m.Sent, DateTimeKind.Utc),
-                attachments = m.Attachments.Select(a => new {
+                attachments = m.Attachments.Select(a => new
+                {
                     id = a.Id,
+                    url = $"/api/attachments/{a.Id}",
                     contentType = a.MimeType
                 }).ToList()
             })
@@ -48,23 +58,13 @@ public class MessagesController : ControllerBase
         return Ok(list);
     }
 
-    public class SendMessageDto
-    {
-        public int ChatId { get; set; }
-        public string? Text { get; set; }
-        public List<string>? Attachments { get; set; } // ids, если используешь загрузку
-    }
 
-    // POST /api/messages
     [HttpPost]
     public async Task<IActionResult> Post([FromBody] SendMessageDto dto)
     {
         var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
 
-        var exists = await _db.Chats.AnyAsync(c => c.Id == dto.ChatId);
-        if (!exists) return NotFound("Chat not found");
-
-        var msg = new Core.Entities.Message
+        var msg = new Message
         {
             ChatId = dto.ChatId,
             SenderId = userId,
@@ -74,7 +74,34 @@ public class MessagesController : ControllerBase
         _db.Messages.Add(msg);
         await _db.SaveChangesAsync();
 
-        // Если у тебя есть таблица Attachments и upload — тут можно привязать их к msg.Id по dto.Attachments
+        // привязать загруженные вложения к сообщению
+        if (dto.Attachments?.Any() == true)
+        {
+            var atts = await _db.Attachments
+                .Where(a => dto.Attachments.Contains(a.Id))
+                .ToListAsync();
+
+            foreach (var a in atts) a.MessageId = msg.Id;
+            await _db.SaveChangesAsync();
+        }
+
+        // собрать payload ровно в том формате, который ждёт фронт
+        var attachments = await _db.Attachments
+            .Where(a => a.MessageId == msg.Id)
+            .Select(a => new
+            {
+                id = a.Id,
+                url = $"/api/attachments/{a.Id}",
+                contentType = a.MimeType,
+                // если делаешь варианты:
+                thumb = a.Variants.Where(v => v.Type == "thumb")
+                                  .Select(v => $"/api/attachments/{a.Id}/thumb")
+                                  .FirstOrDefault(),
+                hls = a.Variants.Where(v => v.Type == "hls")
+                                .Select(v => $"/api/attachments/{a.Id}/hls")
+                                .FirstOrDefault()
+            })
+            .ToListAsync();
 
         var payload = new
         {
@@ -83,12 +110,13 @@ public class MessagesController : ControllerBase
             text = msg.Content,
             senderId = msg.SenderId,
             sentUtc = DateTime.SpecifyKind(msg.Sent, DateTimeKind.Utc),
-            attachments = Array.Empty<object>()
+            attachments
         };
 
-        // рассылаем всем участникам чата (группа "chat:{id}")
-        await _hub.Clients.Group($"chat:{dto.ChatId}").SendAsync("MessageCreated", payload);
+        await _hub.Clients.Group($"chat:{dto.ChatId}")
+            .SendAsync("MessageCreated", payload);
 
         return Ok(payload);
     }
+
 }

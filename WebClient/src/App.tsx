@@ -3,11 +3,12 @@ import { LoginForm } from "./components/LoginForm/LoginForm";
 import { ChatList } from "./components/ChatList/ChatList";
 import { ChatWindow} from "./components/ChatWindow/ChatWindow";
 import type { Msg } from "./components/ChatWindow/ChatWindow";
-import { api, setToken } from "./lib/api";
+import type { Chat } from "./lib/api";
+import { api, setToken, uploadWithProgress } from "./lib/api";
 import { createHub } from "./lib/hub";
+import ProfilePanel from "./components/Profile/ProfilePanel.tsx";
 
 // Тип под ответ /api/chats
-type Chat = { id: number; title: string; unread: number };
 
 export default function App() {
     const [auth, setAuth] = useState<{ token: string; userId: number; name: string } | null>(null);
@@ -17,6 +18,9 @@ export default function App() {
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [typing, setTyping] = useState<string[]>([]);
     const typingTimersRef = useRef<Map<string, any>>(new Map());
+    const [showProfile, setShowProfile] = useState(false);
+
+    const activeChat = chats.find(c => c.id === active) ?? null;
 
     // восстановление токена после перезагрузки
     useEffect(() => {
@@ -95,22 +99,21 @@ export default function App() {
     }
 
     // отправка текста
-    async function send(text: string) {
+    async function send(text: string, attachments?: number[]) {
         if (!active) return;
-        await api.sendMessage(active, text);
-        // новое сообщение придёт через SignalR -> onMessage
+        await api.sendMessage(active, text, attachments && attachments.length ? attachments : undefined);
     }
+        // новое сообщение придёт через SignalR -> onMessage
+
 
     // загрузка файла и отправка как вложение
-    async function upload(file: File) {
-        if (!active) return;
-        const { id } = await api.upload(file);
-        await api.sendMessage(active, "", [id]);
+    async function upload(file: File, onProgress?: (p:number)=>void) {
+        return uploadWithProgress(file, onProgress); // ← вот тут реальный прогресс
     }
 
     // "печатает"
     const pingTyping = () => {
-        if (active) hub.typing(active);
+        if (active) void hub.typing(active); // ← избежать варнинга “Promise ignored”
     };
 
     // экран логина
@@ -131,9 +134,12 @@ export default function App() {
     // основной UI
     return (
         <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", height: "100vh" }}>
+            <button onClick={()=>setShowProfile(true)}>Профиль</button>
+            {showProfile && <ProfilePanel onClose={()=>setShowProfile(false)} />}
             <ChatList items={chats} activeId={active} onOpen={openChat} />
             <ChatWindow
-                title={chats.find((c) => c.id === active)?.title}
+                title={activeChat?.title}
+                avatarUrl={activeChat?.avatarUrl}
                 userId={auth.userId}
                 messages={msgs}
                 onSend={send}

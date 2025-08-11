@@ -12,6 +12,7 @@
   "dependencies": {
     "@microsoft/signalr": "^9.0.6",
     "dayjs": "^1.11.13",
+    "hls.js": "^1.6.9",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
