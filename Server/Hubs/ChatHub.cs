@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Server.Services;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 
 namespace Server.Hubs
@@ -10,7 +12,46 @@ namespace Server.Hubs
     public class ChatHub : Hub
     {
         private readonly AppDbContext _db;
-        public ChatHub(AppDbContext db) => _db = db;
+        private readonly IPresenceService _presence;
+        public ChatHub(AppDbContext db, IPresenceService presence) {
+            _db = db;
+            _presence = presence;
+        }
+
+        public override async Task OnConnectedAsync()
+        {
+            var userId = GetUserId();
+            if (userId is null) return;
+            _presence.Connected(userId.Value, Context.ConnectionId);
+
+            // сообщим всем: пользователь онлайн
+            await Clients.All.SendAsync("PresenceChanged", new { userId, isOnline = true, lastSeenUtc = (DateTime?)null });
+
+            await base.OnConnectedAsync();
+        }
+
+        public override async Task OnDisconnectedAsync(Exception? exception)
+        {
+            var userId = GetUserId();
+            if (userId is null) return;
+
+            _presence.Disconnected(userId.Value, Context.ConnectionId);
+
+            // если совсем вышел (нет активных подключений) — обновим LastSeen и сообщим остальным
+            if (!_presence.IsOnline(userId.Value))
+            {
+                var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId.Value);
+                if (u != null)
+                {
+                    u.LastSeenUtc = DateTime.UtcNow;
+                    await _db.SaveChangesAsync();
+                }
+
+                await Clients.All.SendAsync("PresenceChanged", new { userId, isOnline = false, lastSeenUtc = u?.LastSeenUtc });
+            }
+
+            await base.OnDisconnectedAsync(exception);
+        }
 
         // Клиент вызывает после выбора чата
         public Task JoinChat(int chatId) =>
@@ -38,8 +79,8 @@ namespace Server.Hubs
 
         private int? GetUserId()
         {
-            var claim = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            return int.TryParse(claim, out var id) ? id : null;
+            var claim = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(claim, out var id) ? id : (int?)null;
         }
     }
 } 

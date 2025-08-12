@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Server.Services;
 using System.Security.Claims;
 
 namespace Server.Controllers;
@@ -14,8 +15,9 @@ public class ChatsController : ControllerBase
     private readonly AppDbContext _db;
     public ChatsController(AppDbContext db) { _db = db; }
 
+    [Authorize]
     [HttpGet]
-    public async Task<IActionResult> My()
+    public async Task<IActionResult> My([FromServices] IPresenceService presence)
     {
         var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -24,10 +26,9 @@ public class ChatsController : ControllerBase
             .Where(cu => cu.UserId == me)
             .Select(cu => new
             {
-                ChatId = cu.ChatId,
-                ChatName = cu.Chat.Name,
-                // подтянем участников
-                Members = cu.Chat.ChatUsers.Select(x => new { x.User.Id, x.User.Name, x.User.AvatarUrl })
+                cu.Chat.Id,
+                cu.Chat.Name,
+                Members = cu.Chat.ChatUsers.Select(x => new { x.User.Id, x.User.Name, x.User.AvatarUrl, x.User.LastSeenUtc })
             })
             .ToListAsync();
 
@@ -37,25 +38,30 @@ public class ChatsController : ControllerBase
             var isGroup = members.Count != 2;
             string title;
             string? avatar = null;
+            bool? isOnline = null;
+            DateTime? lastSeenUtc = null;
 
             if (isGroup)
             {
-                title = x.ChatName ?? "Группа";
-                // при желании: групповой аватар из Chat.AvatarUrl
+                title = x.Name ?? "Группа";
             }
             else
             {
                 var peer = members.First(m => m.Id != me);
                 title = peer.Name ?? $"User#{peer.Id}";
                 avatar = peer.AvatarUrl;
+                isOnline = presence.IsOnline(peer.Id);
+                lastSeenUtc = peer.LastSeenUtc;
             }
 
             return new
             {
-                id = x.ChatId,
+                id = x.Id,
                 title,
                 avatarUrl = avatar,
-                isGroup
+                isGroup,
+                isOnline,
+                lastSeenUtc
             };
         });
 

@@ -14,5 +14,7 @@ namespace Core.Entities
         public string? Password { get; set; }
 
         public string? AvatarUrl { get; set; }
+
+        public DateTime? LastSeenUtc { get; set; }
     }
 }

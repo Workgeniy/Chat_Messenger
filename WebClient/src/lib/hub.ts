@@ -3,7 +3,7 @@ import * as signalR from "@microsoft/signalr";
 export function createHub(getToken: () => string | null) {
     const connection = new signalR.HubConnectionBuilder()
         .withUrl("/chatHub", {
-            accessTokenFactory: () => getToken() || localStorage.getItem("token") || ""
+            accessTokenFactory: () => getToken() ?? ""
         })
         .withAutomaticReconnect()
         .build();

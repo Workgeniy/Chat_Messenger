@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoginForm } from "./components/LoginForm/LoginForm";
+import { RegisterForm } from "./components/LoginForm/RegisterForm.tsx";
 import { ChatList } from "./components/ChatList/ChatList";
-import { ChatWindow} from "./components/ChatWindow/ChatWindow";
+import { ChatWindow } from "./components/ChatWindow/ChatWindow";
 import type { Msg } from "./components/ChatWindow/ChatWindow";
 import type { Chat } from "./lib/api";
 import { api, setToken, uploadWithProgress } from "./lib/api";
 import { createHub } from "./lib/hub";
 import ProfilePanel from "./components/Profile/ProfilePanel.tsx";
-
-// Тип под ответ /api/chats
+import AvatarMenu from "./components/Users/AvatarMenu";
+import SearchUsersModal from "./components/Users/SearchUsersModal";
+import {saveAuthToStorage, loadAuthFromStorage, logoutThisTab, type StoredAccount} from "./lib/authStore";
 
 export default function App() {
-    const [auth, setAuth] = useState<{ token: string; userId: number; name: string } | null>(null);
+    const [auth, setAuth] = useState<StoredAccount | null>(null);
     const [chats, setChats] = useState<Chat[]>([]);
     const [active, setActive] = useState<number | null>(null);
     const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -19,27 +21,24 @@ export default function App() {
     const [typing, setTyping] = useState<string[]>([]);
     const typingTimersRef = useRef<Map<string, any>>(new Map());
     const [showProfile, setShowProfile] = useState(false);
+    const [authMode, setAuthMode] = useState<"login" | "register">("login");
+    const [showSearch, setShowSearch] = useState(false);
 
-    const activeChat = chats.find(c => c.id === active) ?? null;
+    const activeChat = chats.find((c) => c.id === active) ?? null;
 
-    // восстановление токена после перезагрузки
+    // ВОССТАНОВЛЕНИЕ: только через нашу прослойку accounts + activeUserId
     useEffect(() => {
-        const t = localStorage.getItem("token");
-        const uid = localStorage.getItem("userId");
-        const name = localStorage.getItem("name");
-        if (t && uid && name) {
-            setToken(t);
-            setAuth({ token: t, userId: Number(uid), name });
+        const acc = loadAuthFromStorage();
+        if (acc) {
+            setToken(acc.token);
+            setAuth(acc);
         }
     }, []);
 
-    // создаём соединение с хабом; токен берём из состояния или localStorage
-    const hub = useMemo(
-        () => createHub(() => auth?.token ?? localStorage.getItem("token")),
-        [auth]
-    );
+    // Hub использует токен только из auth
+    const hub = useMemo(() => createHub(() => auth?.token ?? null), [auth]);
 
-    // после логина: стартуем хаб и тянем список чатов
+    // После логина/восстановления — стартуем hub и тянем чаты
     useEffect(() => {
         if (!auth) return;
         setToken(auth.token);
@@ -50,21 +49,30 @@ export default function App() {
         })();
     }, [auth]);
 
-    // получаем входящие сообщения через SignalR
+    // Входящие сообщения
     useEffect(() => {
         const handler = (m: any) => {
-            // ожидается: { id, chatId, text, senderId, sentUtc }
             if (m.chatId === active) setMsgs((prev) => [...prev, m]);
         };
         hub.onMessage(handler);
         return () => hub.offMessage(handler);
     }, [active, hub]);
 
-    // индикатор "печатает…"
+    useEffect(() => {
+        // простой вариант: при любом изменении presence просто перетянуть /api/chats
+        const onPresence = () => {
+            api.myChats().then(setChats).catch(() => {});
+        };
+        hub.connection.on("PresenceChanged", onPresence);
+        return () => hub.connection.off("PresenceChanged", onPresence);
+    }, [hub]);
+
+    // Индикатор «печатает…» — НЕ показываем для себя
     useEffect(() => {
         const timers = typingTimersRef.current;
         const handler = (p: { chatId: number; userId: number; displayName?: string }) => {
             if (p.chatId !== active) return;
+            if (p.userId === auth?.userId) return; // фильтр самого себя
             const name = p.displayName ?? `User#${p.userId}`;
             setTyping((prev) => (prev.includes(name) ? prev : [...prev, name]));
             clearTimeout(timers.get(name));
@@ -78,18 +86,16 @@ export default function App() {
         };
         hub.onTyping(handler);
         return () => hub.offTyping(handler);
-    }, [active, hub]);
+    }, [active, hub, auth?.userId]);
 
-    // открыть чат: подписка в группу + загрузка истории
     async function openChat(id: number) {
         setActive(id);
         await hub.joinChat(id);
         const data = await api.messages(id);
         setMsgs(data);
-        setCursor(data.length ? data[0].sentUtc : undefined); // курсор — самое старое сообщение в выдаче
+        setCursor(data.length ? data[0].sentUtc : undefined);
     }
 
-    // подгрузка истории (кручёная вверх)
     async function loadOlder() {
         if (!active || !cursor) return;
         const older = await api.messages(active, cursor);
@@ -98,45 +104,93 @@ export default function App() {
         setCursor(older[0].sentUtc);
     }
 
-    // отправка текста
     async function send(text: string, attachments?: number[]) {
         if (!active) return;
         await api.sendMessage(active, text, attachments && attachments.length ? attachments : undefined);
     }
-        // новое сообщение придёт через SignalR -> onMessage
 
-
-    // загрузка файла и отправка как вложение
-    async function upload(file: File, onProgress?: (p:number)=>void) {
-        return uploadWithProgress(file, onProgress); // ← вот тут реальный прогресс
+    async function upload(file: File, onProgress?: (p: number) => void) {
+        return uploadWithProgress(file, onProgress);
     }
 
-    // "печатает"
     const pingTyping = () => {
-        if (active) void hub.typing(active); // ← избежать варнинга “Promise ignored”
+        if (active) void hub.typing(active);
     };
 
-    // экран логина
+    function doLogout() {
+        logoutThisTab();     // выходим только из ЭТОЙ вкладки
+        setToken(null);
+        setAuth(null);
+        location.reload();
+    }
+
+    // ——— Аутентификация ———
     if (!auth) {
-        return (
-            <LoginForm
-                onLogin={(token, userId, name) => {
+        return authMode === "login" ? (
+            <div style={{ display: "grid", placeItems: "center", height: "100vh" }}>
+                <LoginForm
+                    onLogin={(token, userId, name) => {
+                        const acc: StoredAccount = { token, userId, name };
+                        setToken(token);
+                        saveAuthToStorage(acc); // сохраняем аккаунт + активируем в этой вкладке
+                        setAuth(acc);
+                    }}
+                />
+                <button
+                    type="button"
+                    onClick={() => setAuthMode("register")}
+                    style={{
+                        marginTop: 12,
+                        border: "none",
+                        background: "transparent",
+                        color: "#2563eb",
+                        cursor: "pointer"
+                    }}
+                >
+                    Создать аккаунт
+                </button>
+            </div>
+        ) : (
+            <RegisterForm
+                onDone={(token, userId, name) => {
+                    const acc: StoredAccount = { token, userId, name };
                     setToken(token);
-                    localStorage.setItem("token", token);
-                    localStorage.setItem("userId", String(userId));
-                    localStorage.setItem("name", name);
-                    setAuth({ token, userId, name });
+                    saveAuthToStorage(acc);
+                    setAuth(acc);
                 }}
+                onCancel={() => setAuthMode("login")}
             />
         );
     }
 
-    // основной UI
+    // ——— Основной UI ———
     return (
         <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", height: "100vh" }}>
-            <button onClick={()=>setShowProfile(true)}>Профиль</button>
-            {showProfile && <ProfilePanel onClose={()=>setShowProfile(false)} />}
+            {/* Аватар + меню */}
+            <div style={{ position: "fixed", top: 10, left: 10, zIndex: 60 }}>
+                <AvatarMenu
+                    name={auth.name}
+                    onProfile={() => setShowProfile(true)}
+                    onSearch={() => setShowSearch(true)}
+                    onNewChat={() => setShowSearch(true)}
+                    onLogout={doLogout}
+                />
+            </div>
+
+            {showProfile && <ProfilePanel onClose={() => setShowProfile(false)} />}
+
+            {showSearch && (
+                <SearchUsersModal
+                    onClose={() => setShowSearch(false)}
+                    onPick={(u) => {
+                        // TODO: создать / открыть диалог с u.id
+                        setShowSearch(false);
+                    }}
+                />
+            )}
+
             <ChatList items={chats} activeId={active} onOpen={openChat} />
+
             <ChatWindow
                 title={activeChat?.title}
                 avatarUrl={activeChat?.avatarUrl}

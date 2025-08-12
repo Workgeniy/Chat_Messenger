@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Server.Hubs;
+using Server.Services;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,6 +29,8 @@ builder.Services.AddCors(o =>
 
 // SignalR
 builder.Services.AddSignalR();
+
+builder.Services.AddSingleton<IPresenceService, PresenceService>();
 
 // JWT
 var keyBytes = Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]

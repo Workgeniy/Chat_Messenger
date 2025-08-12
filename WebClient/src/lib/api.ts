@@ -1,11 +1,20 @@
-export type Chat = { id: number; title: string; avatarUrl?: string; isGroup: boolean };
+export type Chat = {
+    id: number;
+    title: string;
+    avatarUrl?: string;
+    isGroup: boolean;
+    isOnline?: boolean | null;
+    lastSeenUtc?: string | null;
+};
 
 const API = import.meta.env.VITE_API_BASE; // например, "/api"
 
 export type LoginResp = { token: string; userId: number; displayName: string };
 
+export type RegisterResp = { id:number; email:string; name:string };
+
 let token: string | null = null;
-export function setToken(t: string) {
+export function setToken(t: string | null) {
     token = t;
 }
 
@@ -73,6 +82,16 @@ export const api = {
         const form = new FormData();
         form.append("file", file);
         return http<{ avatarUrl: string }>(`/users/me/avatar`, { method: "POST", body: form });
+    },
+
+    async register(name: string, email: string, password: string): Promise<RegisterResp> {
+        const res = await fetch(`${API}/auth/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, email, password })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
     },
 
     searchUsers(query: string) {

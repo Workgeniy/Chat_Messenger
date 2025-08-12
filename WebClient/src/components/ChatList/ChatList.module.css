@@ -6,3 +6,18 @@
 .active { background:#eef3ff; border-color:#cfe0ff; }
 .title { font-size:14px; }
 .unread { background:#4473ff; color:#fff; font-size:12px; padding:2px 8px; border-radius:999px; }
+
+.avatarWrap { position: relative; width: 36px; height: 36px; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; } /* скругление */
+
+.dot {
+    position: absolute;
+    right: -1px; bottom: -1px;
+    width: 10px; height: 10px;
+    background: #22c55e; /* зелёный */
+    border: 2px solid #fff;
+    border-radius: 50%;
+}
+
+.meta { display: grid; }
+.sub { font-size: 12px; color: #6b7280; }
