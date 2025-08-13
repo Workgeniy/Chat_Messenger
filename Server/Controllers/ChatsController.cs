@@ -1,4 +1,5 @@
-﻿using Infrastructure;
+﻿using Core.Entities;
+using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -67,5 +68,49 @@ public class ChatsController : ControllerBase
 
         return Ok(result);
     }
+
+    [Authorize]
+    [HttpPost("startWith/{peerId:int}")]
+    public async Task<IActionResult> StartWith(int peerId)
+    {
+        var me = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        if (me == peerId) return BadRequest("Нельзя начать диалог с самим собой");
+
+        // есть ли уже диалог 1-на-1?
+        var chatId = await _db.ChatUsers
+            .Where(cu => cu.UserId == me)
+            .Select(cu => cu.ChatId)
+            .Intersect(
+                _db.ChatUsers.Where(cu => cu.UserId == peerId).Select(cu => cu.ChatId)
+            )
+            .Where(cid => _db.Chats.Any(c => c.Id == cid && !c.IsGroup)) // если у тебя есть флаг IsGroup
+            .Cast<int?>()
+            .FirstOrDefaultAsync();
+
+        if (chatId is null)
+        {
+            var chat = new Chat { Name = null /* для 1:1 можно null */, IsGroup = false };
+            _db.Chats.Add(chat);
+            await _db.SaveChangesAsync();
+
+            _db.ChatUsers.AddRange(
+                new ChatUser { ChatId = chat.Id, UserId = me, IsAdmin = false, Created = DateTime.UtcNow },
+                new ChatUser { ChatId = chat.Id, UserId = peerId, IsAdmin = false, Created = DateTime.UtcNow }
+            );
+            await _db.SaveChangesAsync();
+            chatId = chat.Id;
+        }
+
+        // вернём карточку чата (title = имя peer)
+        var peer = await _db.Users.AsNoTracking().FirstAsync(u => u.Id == peerId);
+        return Ok(new
+        {
+            id = chatId.Value,
+            title = peer.Name ?? $"User#{peer.Id}",
+            avatarUrl = peer.AvatarUrl,
+            isGroup = false
+        });
+    }
+
 }
 

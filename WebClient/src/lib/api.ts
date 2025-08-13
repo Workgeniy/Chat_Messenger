@@ -7,7 +7,17 @@ export type Chat = {
     lastSeenUtc?: string | null;
 };
 
+export type FoundUser = {
+    id: number;
+    name: string;
+    email: string;
+    avatarUrl?: string;
+    isOnline?: boolean | null;
+    lastSeenUtc?: string | null;
+};
+
 const API = import.meta.env.VITE_API_BASE; // например, "/api"
+
 
 export type LoginResp = { token: string; userId: number; displayName: string };
 
@@ -29,19 +39,15 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
     async login(email: string, password: string): Promise<LoginResp> {
-        const res = await fetch(`${API}/auth/login`, {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE}/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ email, password }),
         });
         if (!res.ok) throw new Error(await res.text());
-        const data = (await res.json()) as LoginResp;
-        setToken(data.token);
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("userId", String(data.userId));
-        localStorage.setItem("name", data.displayName);
-        return data;
+        return res.json();
     },
+
 
     myChats() {
         return http<Chat[]>(`/chats`);
@@ -74,6 +80,12 @@ export const api = {
         return http<{ id:number; name:string; email:string; avatarUrl?:string }>(`/users/me`);
     },
 
+    searchUsers: (q: string) =>
+        http<FoundUser[]>(`/users/search?q=${encodeURIComponent(q)}`),
+
+    startDirect: (peerId: number) =>
+        http<Chat>(`/chats/startWith/${peerId}`, { method: "POST" }),
+
     updateMe(data: { name?:string; email?:string; password?:string }) {
         return http(`/users/me`, { method: "PUT", body: JSON.stringify(data) });
     },
@@ -84,6 +96,10 @@ export const api = {
         return http<{ avatarUrl: string }>(`/users/me/avatar`, { method: "POST", body: form });
     },
 
+    startChatWith: (userId: number) =>
+        http<Chat>(`/chats/startWith/${userId}`, { method: "POST" }),
+
+
     async register(name: string, email: string, password: string): Promise<RegisterResp> {
         const res = await fetch(`${API}/auth/register`, {
             method: "POST",
@@ -92,12 +108,6 @@ export const api = {
         });
         if (!res.ok) throw new Error(await res.text());
         return res.json();
-    },
-
-    searchUsers(query: string) {
-        return http<Array<{ id:number; name:string; email?:string; avatarUrl?:string }>>(
-            `/users/search?query=${encodeURIComponent(query)}`
-        );
     }
 };
 

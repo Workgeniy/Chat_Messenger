@@ -59,10 +59,7 @@ export default function App() {
     }, [active, hub]);
 
     useEffect(() => {
-        // простой вариант: при любом изменении presence просто перетянуть /api/chats
-        const onPresence = () => {
-            api.myChats().then(setChats).catch(() => {});
-        };
+        const onPresence = () => { api.myChats().then(setChats).catch(() => {}); };
         hub.connection.on("PresenceChanged", onPresence);
         return () => hub.connection.off("PresenceChanged", onPresence);
     }, [hub]);
@@ -124,42 +121,19 @@ export default function App() {
         location.reload();
     }
 
-    // ——— Аутентификация ———
     if (!auth) {
-        return authMode === "login" ? (
+        return (
             <div style={{ display: "grid", placeItems: "center", height: "100vh" }}>
                 <LoginForm
                     onLogin={(token, userId, name) => {
-                        const acc: StoredAccount = { token, userId, name };
+                        const acc = { token, userId, name };
                         setToken(token);
-                        saveAuthToStorage(acc); // сохраняем аккаунт + активируем в этой вкладке
+                        saveAuthToStorage(acc);
                         setAuth(acc);
                     }}
+                    onSwitchToRegister={() => setAuthMode("register")}
                 />
-                <button
-                    type="button"
-                    onClick={() => setAuthMode("register")}
-                    style={{
-                        marginTop: 12,
-                        border: "none",
-                        background: "transparent",
-                        color: "#2563eb",
-                        cursor: "pointer"
-                    }}
-                >
-                    Создать аккаунт
-                </button>
             </div>
-        ) : (
-            <RegisterForm
-                onDone={(token, userId, name) => {
-                    const acc: StoredAccount = { token, userId, name };
-                    setToken(token);
-                    saveAuthToStorage(acc);
-                    setAuth(acc);
-                }}
-                onCancel={() => setAuthMode("login")}
-            />
         );
     }
 
@@ -181,9 +155,16 @@ export default function App() {
 
             {showSearch && (
                 <SearchUsersModal
+                    currentUserId={auth.userId}
                     onClose={() => setShowSearch(false)}
-                    onPick={(u) => {
-                        // TODO: создать / открыть диалог с u.id
+                    onPick={async (chat) => {
+                        // апсертим чат в стейт
+                        setChats(prev => {
+                            const i = prev.findIndex(c => c.id === chat.id);
+                            if (i === -1) return [chat, ...prev];
+                            const copy = [...prev]; copy[i] = { ...copy[i], ...chat }; return copy;
+                        });
+                        await openChat(chat.id);
                         setShowSearch(false);
                     }}
                 />

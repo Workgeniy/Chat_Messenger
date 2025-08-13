@@ -44,38 +44,56 @@ public class UsersController : ControllerBase
 
     [Authorize]
     [HttpPost("me/avatar")]
-    [RequestSizeLimit(20 * 1024 * 1024)]
-    public async Task<IActionResult> UploadAvatar([FromForm] IFormFile file)
+    public async Task<IActionResult> UploadAvatar(IFormFile file)
     {
-        if (file == null || file.Length == 0) return BadRequest("empty file");
-        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
-        if (u == null) return NotFound();
+        if (file == null || file.Length == 0) return BadRequest("Файл не передан");
 
-        var folder = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "avatars");
-        Directory.CreateDirectory(folder);
+        var me = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == me);
+        if (user == null) return NotFound();
+
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var name = $"{userId}_{Guid.NewGuid():N}{ext}";
-        var path = Path.Combine(folder, name);
-        await using (var fs = System.IO.File.Create(path)) { await file.CopyToAsync(fs); }
+        var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
+        if (!allowed.Contains(ext)) return BadRequest("Разрешены jpg/jpeg/png/webp");
 
-        u.AvatarUrl = $"/avatars/{name}";
+        Directory.CreateDirectory(Path.Combine(_env.WebRootPath, "avatars"));
+        var fileName = $"{Guid.NewGuid():N}{ext}";
+        var path = Path.Combine(_env.WebRootPath, "avatars", fileName);
+
+        using (var fs = System.IO.File.Create(path))
+            await file.CopyToAsync(fs);
+
+        // сохраним относительный url
+        user.AvatarUrl = $"/avatars/{fileName}";
         await _db.SaveChangesAsync();
-        return Ok(new { avatarUrl = u.AvatarUrl });
+
+        return Ok(new { avatarUrl = user.AvatarUrl });
     }
+
 
     [Authorize]
     [HttpGet("search")]
-    public async Task<IActionResult> Search([FromQuery] string query)
+    public async Task<IActionResult> Search([FromQuery] string q = "", [FromQuery] int take = 20)
     {
-        if (string.IsNullOrWhiteSpace(query)) return Ok(Array.Empty<object>());
-        var list = await _db.Users
+        var me = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        q = (q ?? "").Trim();
+
+        var users = await _db.Users
             .AsNoTracking()
-            .Where(u => u.Name != null && EF.Functions.ILike(u.Name, $"%{query}%"))
+            .Where(u => u.Id != me &&
+                        (q == "" ||
+                         EF.Functions.ILike(u.Name!, $"%{q}%") ||
+                         EF.Functions.ILike(u.Email!, $"%{q}%")))
             .OrderBy(u => u.Name)
-            .Take(20)
-            .Select(u => new { id = u.Id, name = u.Name!, email = u.Email, avatarUrl = u.AvatarUrl })
+            .Take(Math.Clamp(take, 1, 50))
+            .Select(u => new {
+                id = u.Id,
+                name = u.Name,
+                email = u.Email,
+                avatarUrl = u.AvatarUrl
+            })
             .ToListAsync();
-        return Ok(list);
+
+        return Ok(users);
     }
 }
