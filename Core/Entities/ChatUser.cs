@@ -15,6 +15,8 @@ namespace Core.Entities
         public User? User { get; set; }
 
         public bool IsAdmin { get; set; }
+
+       
         public DateTime Created {  get; set; }
     } 
 }

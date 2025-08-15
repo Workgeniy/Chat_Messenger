@@ -14,6 +14,7 @@ namespace Core.Entities
         public bool IsGroup { get; set; }
         public DateTime Created { get; set; }
 
+        public string? AvatarUrl { get; set; }
 
         public ICollection<ChatUser> ChatUsers { get; set; } = new List<ChatUser>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();

@@ -15,6 +15,8 @@ namespace Core.Entities
 
         public string? AvatarUrl { get; set; }
 
+        public bool IsOnline {  get; set; }
+
         public DateTime? LastSeenUtc { get; set; }
     }
 }

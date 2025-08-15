@@ -17,7 +17,7 @@ type Pending = { id: number; name: string; thumbUrl?: string; progress?: number 
 
 type Props = {
     title?: string;
-    avatarUrl?: string;
+    avatarUrl?: string;             // ← добавь
     userId: number;
     messages: Msg[];
     onSend: (text: string, attachments?: number[]) => Promise<void> | void;

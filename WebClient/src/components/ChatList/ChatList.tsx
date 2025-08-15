@@ -1,39 +1,49 @@
 import styles from "./ChatList.module.css";
 import type { Chat } from "../../lib/api";
+import { toFullUrl, fallbackAvatar } from "../../lib/url";
 
-export function ChatList({ items, activeId, onOpen }:{
-    items: Chat[]; activeId: number|null; onOpen:(id:number)=>void;
-}) {
+export function ChatList({
+                             items, activeId, onOpen, myId
+                         }: { items: Chat[]; activeId: number|null; onOpen:(id:number)=>void; myId: number }) {
+
+    function fmtTime(iso?: string | null) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        const now = new Date();
+        const pad = (n:number)=>String(n).padStart(2,"0");
+        const sameDay = d.toDateString() === now.toDateString();
+        return sameDay ? `${pad(d.getHours())}:${pad(d.getMinutes())}`
+            : `${pad(d.getDate())}.${pad(d.getMonth()+1)}`;
+    }
+
     return (
         <aside className={styles.root}>
             <div className={styles.header}>Диалоги</div>
             <div className={styles.list}>
                 {items.map(c => {
-                    const fallback = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(c.title || "?")}`;
-                    const statusText = c.isGroup
-                        ? ""
-                        : c.isOnline
-                            ? "онлайн"
-                            : c.lastSeenUtc
-                                ? formatLastSeen(c.lastSeenUtc)
-                                : "";
+                    const src = toFullUrl(c.avatarUrl) || fallbackAvatar(c.title);
+                    const previewPrefix = c.lastSenderId && c.lastSenderId === myId ? "Вы: " : "";
+                    const previewText = c.lastText ? `${previewPrefix}${c.lastText}` : "Нет сообщений";
 
                     return (
-                        <button key={c.id}
-                                onClick={()=>onOpen(c.id)}
-                                className={`${styles.item} ${activeId===c.id ? styles.active : ""}`}>
+                        <button
+                            key={c.id}
+                            onClick={() => onOpen(c.id)}
+                            className={`${styles.item} ${activeId === c.id ? styles.active : ""}`}
+                        >
                             <div className={styles.avatarWrap}>
-                                <img
-                                    src={c.avatarUrl || fallback}
-                                    onError={(e)=>{ if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }}
-                                    className={styles.avatar}
-                                    alt=""
-                                />
-                                {!c.isGroup && c.isOnline && <span className={styles.dot} aria-label="online" />}
+                                <img src={src} className={styles.avatar} alt="" />
+                                {c.isOnline ? <span className={styles.dot} /> : null}
                             </div>
-                            <div className={styles.meta}>
-                                <div className={styles.title}>{c.title}</div>
-                                {!c.isGroup && statusText && <div className={styles.sub}>{statusText}</div>}
+
+                            <div className={styles.body}>
+                                <div className={styles.topRow}>
+                                    <div className={styles.title}>{c.title}</div>
+                                    <div className={styles.time}>{fmtTime(c.lastUtc)}</div>
+                                </div>
+                                <div className={styles.preview} title={c.lastText || ""}>
+                                    {previewText}
+                                </div>
                             </div>
                         </button>
                     );
@@ -42,6 +52,7 @@ export function ChatList({ items, activeId, onOpen }:{
         </aside>
     );
 }
+
 
 // простое форматирование "был(а) в сети ..."
 function formatLastSeen(iso: string) {
