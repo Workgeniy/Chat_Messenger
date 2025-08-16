@@ -171,6 +171,12 @@ namespace Infrastructure.Migrations
                     b.Property<string>("Content")
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("EditedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("ReplyToMessageId")
                         .HasColumnType("integer");
 
@@ -189,6 +195,30 @@ namespace Infrastructure.Migrations
                     b.HasIndex("ChatId", "Sent");
 
                     b.ToTable("Messages");
+                });
+
+            modelBuilder.Entity("Core.Entities.MessageReaction", b =>
+                {
+                    b.Property<int>("MessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Emoji")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("timezone('utc', now())");
+
+                    b.HasKey("MessageId", "UserId", "Emoji");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("MessageReactions");
                 });
 
             modelBuilder.Entity("Core.Entities.User", b =>
@@ -290,6 +320,25 @@ namespace Infrastructure.Migrations
                     b.Navigation("Sender");
                 });
 
+            modelBuilder.Entity("Core.Entities.MessageReaction", b =>
+                {
+                    b.HasOne("Core.Entities.Message", "Message")
+                        .WithMany("Reactions")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Core.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Core.Entities.Attachment", b =>
                 {
                     b.Navigation("Variants");
@@ -305,6 +354,8 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Core.Entities.Message", b =>
                 {
                     b.Navigation("Attachments");
+
+                    b.Navigation("Reactions");
                 });
 #pragma warning restore 612, 618
         }

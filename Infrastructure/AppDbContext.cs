@@ -14,6 +14,7 @@ namespace Infrastructure
             public DbSet<Message> Messages => Set<Message>();
             public DbSet<Attachment> Attachments => Set<Attachment>();
             public DbSet<AttachmentVariant> AttachmentVariants => Set<AttachmentVariant>();
+            public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -24,42 +25,66 @@ namespace Infrastructure
                 .HasKey(x => new { x.UserId, x.ChatId });
 
             modelBuilder.Entity<ChatUser>()
-                .HasOne(x => x.Chat)
-                .WithMany(c => c.ChatUsers)
-                .HasForeignKey(x => x.ChatId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .HasOne(x => x.Chat).WithMany(c => c.ChatUsers)
+                .HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<ChatUser>()
-                .HasOne(x => x.User)
-                .WithMany() // если у User нет коллекции Chats
-                .HasForeignKey(x => x.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
 
             // Message -> Chat
             modelBuilder.Entity<Message>()
-                .HasOne(m => m.Chat)
-                .WithMany(c => c.Messages)
-                .HasForeignKey(m => m.ChatId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .HasOne(m => m.Chat).WithMany(c => c.Messages)
+                .HasForeignKey(m => m.ChatId).OnDelete(DeleteBehavior.Cascade);
 
-            // Message -> Sender (User)
+            // Message -> Sender
             modelBuilder.Entity<Message>()
-                .HasOne(m => m.Sender)
-                .WithMany() // если у User нет коллекции Messages
-                .HasForeignKey(m => m.SenderId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .HasOne(m => m.Sender).WithMany()
+                .HasForeignKey(m => m.SenderId).OnDelete(DeleteBehavior.Restrict);
 
- 
-
+            // ReplyTo (self-reference)
             modelBuilder.Entity<Message>()
-                .HasOne(m => m.ReplyToMessage)
-                .WithMany()
+                .HasOne(m => m.ReplyToMessage).WithMany()
                 .HasForeignKey(m => m.ReplyToMessageId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Индексы, время в UTC
+            // Индексы
             modelBuilder.Entity<Message>().HasIndex(m => new { m.ChatId, m.Sent });
             modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+
+            // REACTIONS
+            modelBuilder.Entity<MessageReaction>()
+                .HasKey(r => new { r.MessageId, r.UserId, r.Emoji });
+
+            modelBuilder.Entity<MessageReaction>()
+                .Property(r => r.Emoji).HasMaxLength(16);
+
+            modelBuilder.Entity<MessageReaction>()
+                .Property(r => r.CreatedUtc)
+                .HasDefaultValueSql("timezone('utc', now())");
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.Message).WithMany(m => m.Reactions)
+                .HasForeignKey(r => r.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.User).WithMany()
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.Message)
+                .WithMany(m => m.Reactions)
+                .HasForeignKey(r => r.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.User)
+                .WithMany()
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
 
     }

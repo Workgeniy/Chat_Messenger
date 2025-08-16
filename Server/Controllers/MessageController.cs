@@ -1,4 +1,5 @@
-﻿using Core.Entities;
+﻿using Core.DTO;
+using Core.Entities;
 using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -6,7 +7,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Server.Hubs;
 using System.Linq;
-using Core.DTO;
+using System.Security.Claims;
 
 namespace Server.Controllers;
 
@@ -25,33 +26,35 @@ public class MessagesController : ControllerBase
     }
 
     [Authorize]
+
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int chatId, [FromQuery] DateTime? before, [FromQuery] int take = 50)
     {
-        var q = _db.Messages
-            .AsNoTracking()
-            .Where(m => m.ChatId == chatId);
+        var q = _db.Messages.AsNoTracking().Where(m => m.ChatId == chatId);
+        if (before.HasValue) q = q.Where(m => m.Sent < before.Value);
 
-        if (before.HasValue)
-            q = q.Where(m => m.Sent < before.Value);
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
         var list = await q
             .OrderByDescending(m => m.Sent)
             .Take(take)
-            .OrderBy(m => m.Sent) // вернуть по возрастанию
+            .OrderBy(m => m.Sent)
             .Select(m => new
             {
                 id = m.Id,
                 chatId = m.ChatId,
-                text = m.Content,
+                text = m.IsDeleted ? "Сообщение удалено" : m.Content,
                 senderId = m.SenderId,
-                sentUtc = DateTime.SpecifyKind(m.Sent, DateTimeKind.Utc),
-                attachments = m.Attachments.Select(a => new
-                {
-                    id = a.Id,
-                    url = $"/api/attachments/{a.Id}",
-                    contentType = a.MimeType
-                }).ToList()
+                sentUtc = m.Sent,
+                editedUtc = m.EditedUtc,
+                attachments = m.Attachments.Select(a => new { id = a.Id, url = a.StoragePath, contentType = a.MimeType }),
+                reactions = m.Reactions
+                    .GroupBy(r => r.Emoji)
+                    .Select(g => new {
+                        emoji = g.Key,
+                        count = g.Count(),
+                        mine = g.Any(r => r.UserId == userId)
+                    })
             })
             .ToListAsync();
 
@@ -118,5 +121,112 @@ public class MessagesController : ControllerBase
 
         return Ok(payload);
     }
+
+    [HttpPatch("{id:int}")]
+    public async Task<IActionResult> EditMessage(int id, [FromBody] EditDto dto)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var m = await _db.Messages.FirstOrDefaultAsync(x => x.Id == id);
+        if (m == null) return NotFound();
+        if (m.SenderId != userId) return Forbid();
+
+        m.Content = dto.text ?? "";
+        m.EditedUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _hub.Clients.Group($"chat:{m.ChatId}").SendAsync("MessageEdited", new
+        {
+            id = m.Id,
+            chatId = m.ChatId,
+            text = m.Content,
+            editedUtc = m.EditedUtc
+        });
+        return NoContent();
+    }
+
+    public record EditDto(string text);
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeleteMessage(int id)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var m = await _db.Messages.FirstOrDefaultAsync(x => x.Id == id);
+        if (m == null) return NotFound();
+        if (m.SenderId != userId) return Forbid();
+
+        m.IsDeleted = true;
+        m.Content = "";            // по желанию
+        m.EditedUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _hub.Clients.Group($"chat:{m.ChatId}").SendAsync("MessageDeleted", new { id = m.Id, chatId = m.ChatId });
+        return NoContent();
+    }
+
+    [HttpPost("{id:int}/react")]
+    public async Task<IActionResult> React(int id, [FromBody] ReactDto dto)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        var exists = await _db.MessageReactions.FindAsync(id, userId, dto.Emoji);
+        if (exists == null)
+        {
+            _db.MessageReactions.Add(new MessageReaction
+            {
+                MessageId = id,
+                UserId = userId,
+                Emoji = dto.Emoji,
+                CreatedUtc = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync();
+        }
+
+        var chatId = await _db.Messages.Where(m => m.Id == id).Select(m => m.ChatId).FirstAsync();
+
+        await _hub.Clients.Group($"chat:{chatId}")
+            .SendAsync("ReactionAdded", new { messageId = id, userId, emoji = dto.Emoji });
+
+        return NoContent();
+    }
+
+    public record ReactDto(string Emoji);
+
+    [HttpDelete("{id:int}/react")]
+    public async Task<IActionResult> Unreact(int id, [FromQuery] string emoji)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var r = await _db.MessageReactions.FindAsync(id, userId, emoji);
+        if (r == null) return NoContent();
+
+        _db.MessageReactions.Remove(r);
+        await _db.SaveChangesAsync();
+
+        var chatId = await _db.Messages.Where(m => m.Id == id).Select(m => m.ChatId).FirstAsync();
+        await _hub.Clients.Group($"chat:{chatId}")
+            .SendAsync("ReactionRemoved", new { messageId = id, userId, emoji });
+
+        return NoContent();
+    }
+
+    [HttpDelete("{id:int}/react/{emoji}")]
+    public async Task<IActionResult> RemoveReact(int id, string emoji)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var rx = await _db.MessageReactions.FindAsync(id, userId, emoji);
+        if (rx != null)
+        {
+            _db.MessageReactions.Remove(rx);
+            await _db.SaveChangesAsync();
+
+            var chatId = await _db.Messages.Where(m => m.Id == id)
+                                           .Select(m => m.ChatId).FirstAsync();
+
+            await _hub.Clients.Group($"chat:{chatId}")
+                .SendAsync("ReactionRemoved", new { messageId = id, userId, emoji }); // 👈
+        }
+        return NoContent();
+    }
+
+
 
 }

@@ -15,7 +15,6 @@ public class ChatsController : ControllerBase
     private readonly AppDbContext _db;
     public ChatsController(AppDbContext db) => _db = db;
 
-    // GET /api/chats
     [HttpGet]
     public async Task<IActionResult> MyChats()
     {
@@ -29,18 +28,19 @@ public class ChatsController : ControllerBase
                 title = cu.Chat.IsGroup
                     ? cu.Chat.Name
                     : cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => x.User.Name)
-                        .FirstOrDefault(),
+                        .Select(x => x.User.Name).FirstOrDefault(),
                 avatarUrl = cu.Chat.IsGroup
                     ? cu.Chat.AvatarUrl
                     : cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => x.User.AvatarUrl)
-                        .FirstOrDefault(),
+                        .Select(x => x.User.AvatarUrl).FirstOrDefault(),
                 isGroup = cu.Chat.IsGroup,
 
+                // если нет текста, но есть вложения — показываем «Вложение»
                 lastText = cu.Chat.Messages
                     .OrderByDescending(m => m.Sent)
-                    .Select(m => m.Content)
+                    .Select(m => string.IsNullOrEmpty(m.Content)
+                        ? (m.Attachments.Any() ? "Вложение" : null)
+                        : m.Content)
                     .FirstOrDefault(),
                 lastUtc = cu.Chat.Messages
                     .OrderByDescending(m => m.Sent)
@@ -51,16 +51,14 @@ public class ChatsController : ControllerBase
                     .Select(m => (int?)m.SenderId)
                     .FirstOrDefault(),
 
-                // индикатор онлайна/last seen — только для 1:1
+                // поля для онлайна ровно как ждёт фронт
                 isOnline = !cu.Chat.IsGroup
                     ? cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => x.User.IsOnline)
-                        .FirstOrDefault()
+                        .Select(x => x.User.IsOnline).FirstOrDefault()
                     : (bool?)null,
                 lastSeenUtc = !cu.Chat.IsGroup
                     ? cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => (DateTime?)x.User.LastSeenUtc)
-                        .FirstOrDefault()
+                        .Select(x => (DateTime?)x.User.LastSeenUtc).FirstOrDefault()
                     : (DateTime?)null
             })
             .OrderByDescending(x => x.lastUtc)
@@ -69,17 +67,14 @@ public class ChatsController : ControllerBase
         return Ok(chats);
     }
 
-    // POST /api/chats/startWith/123
     [HttpPost("startWith/{peerId:int}")]
     public async Task<IActionResult> StartWith(int peerId)
     {
         var me = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         if (me == peerId) return BadRequest("Нельзя начать диалог с самим собой");
 
-        // ищем существующий 1:1
-        var chatId = await _db.ChatUsers
-            .Where(cu => cu.UserId == me)
-            .Select(cu => cu.ChatId)
+        // ищем уже существующий 1:1
+        var chatId = await _db.ChatUsers.Where(cu => cu.UserId == me).Select(cu => cu.ChatId)
             .Intersect(_db.ChatUsers.Where(cu => cu.UserId == peerId).Select(cu => cu.ChatId))
             .Where(cid => _db.Chats.Any(c => c.Id == cid && !c.IsGroup))
             .Cast<int?>()
@@ -92,16 +87,14 @@ public class ChatsController : ControllerBase
             await _db.SaveChangesAsync();
 
             _db.ChatUsers.AddRange(
-                new ChatUser { ChatId = chat.Id, UserId = me, IsAdmin = false, Created = DateTime.UtcNow },
-                new ChatUser { ChatId = chat.Id, UserId = peerId, IsAdmin = false, Created = DateTime.UtcNow }
+                new ChatUser { ChatId = chat.Id, UserId = me, Created = DateTime.UtcNow },
+                new ChatUser { ChatId = chat.Id, UserId = peerId, Created = DateTime.UtcNow }
             );
             await _db.SaveChangesAsync();
-
             chatId = chat.Id;
         }
 
         var peer = await _db.Users.AsNoTracking().FirstAsync(u => u.Id == peerId);
-
         return Ok(new
         {
             id = chatId.Value,
@@ -110,4 +103,30 @@ public class ChatsController : ControllerBase
             isGroup = false
         });
     }
+
+    public record CreateChatDto(string name, List<int> memberIds, string? avatarUrl);
+
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody] CreateChatDto dto)
+    {
+        var me = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var chat = new Chat { Name = dto.name, IsGroup = true, AvatarUrl = dto.avatarUrl };
+        _db.Chats.Add(chat);
+        await _db.SaveChangesAsync();
+
+        var ids = dto.memberIds.Distinct().Where(id => id != me).ToList();
+        var members = ids.Append(me).Distinct().ToList();
+
+        _db.ChatUsers.AddRange(members.Select(uid => new ChatUser
+        {
+            ChatId = chat.Id,
+            UserId = uid,
+            IsAdmin = uid == me,
+            Created = DateTime.UtcNow
+        }));
+        await _db.SaveChangesAsync();
+
+        return Ok(new { id = chat.Id, title = chat.Name, avatarUrl = chat.AvatarUrl, isGroup = true });
+    }
+
 }

@@ -105,7 +105,7 @@ export const api = {
 
     // ВОЗВРАЩАЕМ ИМЕННО { chatId }, чтобы совпадало с UI
     startChatWith: (userId: number) =>
-        http<StartChatResp>(`/chats/startWith/${userId}`, { method: "POST" }),
+        http<Chat>(`/chats/startWith/${userId}`, { method: "POST" }),
 
 
     updateMe: (data: { name?: string; email?: string; password?: string }) =>
@@ -116,6 +116,14 @@ export const api = {
         form.append("file", file);
         return http<{ avatarUrl: string }>(`/users/me/avatar`, { method: "POST", body: form });
     },
+    editMessage: (id:number, text:string) =>
+        http(`/messages/${id}`, { method: "PATCH", body: JSON.stringify({ text }) }),
+    deleteMessage: (id:number) =>
+        http(`/messages/${id}`, { method: "DELETE" }),
+    react: (id:number, emoji:string) =>
+        http(`/messages/${id}/react`, { method: "POST", body: JSON.stringify({ emoji }) }),
+    unreact: (id:number, emoji:string) =>
+        http(`/messages/${id}/react?emoji=${encodeURIComponent(emoji)}`, { method: "DELETE" }),
 };
 
 // реальная загрузка с прогрессом

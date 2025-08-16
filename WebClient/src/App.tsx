@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-
 import { LoginForm } from "./components/LoginForm/LoginForm";
 import { RegisterForm } from "./components/LoginForm/RegisterForm";
 import { ChatList } from "./components/ChatList/ChatList";
@@ -65,6 +64,35 @@ export default function App() {
             } catch { /* no-op */ }
         })();
     }, [auth?.userId]);
+
+
+    //изменения от собеседника
+    useEffect(() => {
+        const onEdited = (p:{ id:number; chatId:number; text:string; editedUtc:string }) => {
+            setMsgs(prev => prev.map(m => m.id === p.id ? { ...m, text: p.text, editedUtc: p.editedUtc } : m));
+
+            // если это активный чат — апдейт превью
+            setChats(prev => prev.map(c => c.id === p.chatId ? { ...c, lastText: p.text, lastUtc: p.editedUtc } : c));
+        };
+
+        const onDeleted = (p:{ id:number; chatId:number }) => {
+            const editedUtc = new Date().toISOString();
+            setMsgs(prev => prev.map(m => m.id === p.id ? { ...m, isDeleted: true, text: "", editedUtc } : m));
+
+            // если удалили самое новое сообщение — поменяем превью
+            setChats(prev => prev.map(c => {
+                if (c.id !== p.chatId) return c;
+                const last = [...msgs].filter(x => x.chatId === c.id).slice(-1)[0];
+                if (last && last.id === p.id) return { ...c, lastText: "Сообщение удалено", lastUtc: editedUtc };
+                return c;
+            }));
+        };
+
+        hub.onEdited(onEdited);
+        hub.onDeleted(onDeleted);
+        return () => { hub.offEdited(onEdited); hub.offDeleted(onDeleted); };
+    }, [hub, msgs]);
+
 
 
     // входящие сообщения
@@ -141,6 +169,77 @@ export default function App() {
         location.reload();
     }
 
+    function applyReaction(messageId:number, userId:number, emoji:string, add:boolean) {
+        setMsgs(prev => prev.map(m => {
+            if (m.id !== messageId) return m;
+            const me = auth?.userId === userId;
+            const list = [...(m.reactions ?? [])];
+            const i = list.findIndex(r => r.emoji === emoji);
+            if (add) {
+                if (i >= 0) list[i] = { ...list[i], count: list[i].count + 1, mine: list[i].mine || me };
+                else list.push({ emoji, count: 1, mine: me });
+            } else {
+                if (i >= 0) {
+                    const nextCount = Math.max(0, list[i].count - 1);
+                    const mine = me ? false : list[i].mine;
+                    if (nextCount === 0) list.splice(i,1);
+                    else list[i] = { ...list[i], count: nextCount, mine };
+                }
+            }
+            return { ...m, reactions: list };
+        }));
+    }
+
+    useEffect(() => {
+        const add = (p:{messageId:number; userId:number; emoji:string}) =>
+            applyReaction(p.messageId, p.userId, p.emoji, true);
+        const rem = (p:{messageId:number; userId:number; emoji:string}) =>
+            applyReaction(p.messageId, p.userId, p.emoji, false);
+
+        hub.onReactionAdded(add);
+        hub.onReactionRemoved(rem);
+        return () => { hub.offReactionAdded(add); hub.offReactionRemoved(rem); };
+    }, [hub, auth?.userId]);
+
+    async function editMessage(id:number, text:string) {
+        const editedUtc = new Date().toISOString();
+        setMsgs(prev => prev.map(m => m.id === id ? { ...m, text, editedUtc } : m));
+        setChats(prev => prev.map(c => {
+            if (c.id !== active) return c;
+            return { ...c, lastText: text, lastUtc: editedUtc, lastSenderId: auth!.userId };
+        }));
+
+        // сервер
+        await api.editMessage(id, text);
+    }
+
+    async function deleteMessage(id:number) {
+        const editedUtc = new Date().toISOString();
+        setMsgs(prev => prev.map(m => m.id === id ? { ...m, isDeleted: true, text: "", editedUtc } : m));
+
+        // если это было последнее в чате — поменяем превью на «Сообщение удалено»
+        setChats(prev => prev.map(c => {
+            if (c.id !== active) return c;
+            // аккуратно: если именно это сообщение было последним по времени
+            const last = [...msgs].filter(x => x.chatId === c.id).slice(-1)[0];
+            if (last && last.id === id) {
+                return { ...c, lastText: "Сообщение удалено", lastUtc: editedUtc };
+            }
+            return c;
+        }));
+
+        // сервер
+        await api.deleteMessage(id);
+    }
+
+    async function react(id:number, emoji:string) {
+        await api.react(id, emoji);
+    }
+
+    async function unreact(id:number, emoji:string) {
+        await api.unreact(id, emoji);
+    }
+
     // ——— AUTH SCREENS ———
     if (!auth) {
         return authMode === "login" ? (
@@ -170,8 +269,9 @@ export default function App() {
 
     // ——— MAIN UI ———
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 34%) 1fr", height: "100vh" }}>
-            {/* аватар + меню слева-сверху */}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 32%) 1fr", height: "100vh" }}>
+
+        {/* аватар + меню слева-сверху */}
             <div style={{ position: "fixed", top: 10, left: 10, zIndex: 60 }}>
                 <AvatarMenu
                     name={auth.name}
@@ -192,12 +292,7 @@ export default function App() {
                     onClose={() => setShowSearch(false)}
                     onPick={async (chatId) => {
                         setShowSearch(false);
-                        // обновим список чатов, чтобы новый точно появился
-                        const list = await api.myChats();
-                        setChats(list);
-                        // и откроем его
-                        await openChat(chatId);
-                        setChats(await api.myChats());
+                        await openChat(chatId); // подтягиваем историю и подписываемся на группу
                     }}
                 />
             )}
@@ -215,7 +310,12 @@ export default function App() {
                 onTyping={pingTyping}
                 typingUsers={typing}
                 onLoadOlder={loadOlder}
+                onEdit={async (id, text) => { await api.editMessage(id, text); }}
+                onDelete={async (id) => { await api.deleteMessage(id); }}
+                onReact={async (id, emoji) => { await api.react(id, emoji); }}
+                onUnreact={async (id, emoji) => { await api.unreact(id, emoji); }}
             />
+
         </div>
     );
 }
