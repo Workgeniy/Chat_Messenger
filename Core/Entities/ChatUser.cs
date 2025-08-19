@@ -16,7 +16,10 @@ namespace Core.Entities
 
         public bool IsAdmin { get; set; }
 
-       
         public DateTime Created {  get; set; }
-    } 
+        public int? LastSeenMessageId { get; set; }
+        public DateTime? LastSeenUtc { get; set; }
+
+
+    }
 }

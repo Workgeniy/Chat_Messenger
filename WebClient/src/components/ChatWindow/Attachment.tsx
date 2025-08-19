@@ -1,25 +1,18 @@
-type Props = {
-    a: { id: number | string; url?: string; contentType?: string };
-};
-
-function toFullUrl(u?: string) {
-    if (!u) return "";
-    if (/^https?:\/\//i.test(u)) return u;
-    return u.startsWith("/") ? u : `/${u}`;
-}
+// Attachment.tsx — обнови
+type Props = { a: { id: number | string; url?: string; contentType?: string } };
 
 export function Attachment({ a }: Props) {
     if (!a.url) return null;
-    const url = toFullUrl(a.url);
-    const type = a.contentType || "";
+    const type = a.contentType?.toLowerCase() || "";
 
     if (type.startsWith("image/")) {
         return (
-            <a href={url} target="_blank" rel="noreferrer">
+            <a href={a.url} target="_blank" rel="noreferrer">
                 <img
-                    src={url}
+                    src={a.url}
+                    loading="lazy"
                     alt="attachment"
-                    style={{ maxWidth: 200, maxHeight: 200, objectFit: "cover", borderRadius: 8 }}
+                    style={{ maxWidth: 220, maxHeight: 220, objectFit: "cover", borderRadius: 8 }}
                 />
             </a>
         );
@@ -27,20 +20,33 @@ export function Attachment({ a }: Props) {
 
     if (type.startsWith("video/")) {
         return (
-            <video controls preload="metadata" src={url} style={{ maxWidth: 320, maxHeight: 320, borderRadius: 8 }}>
-                Ваш браузер не поддерживает видео.
+            <video
+                controls
+                preload="metadata"
+                style={{ maxWidth: 360, maxHeight: 360, borderRadius: 8 }}
+            >
+                <source src={a.url} type={type || "video/mp4"} />
             </video>
         );
     }
 
     return (
         <a
-            href={url}
+            href={a.url}
             target="_blank"
             rel="noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", background: "#f1f1f1", borderRadius: 6 }}
+            style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "4px 8px",
+                background: "#f1f5f9",
+                borderRadius: 6,
+                textDecoration: "none",
+                color: "#111827",
+                border: "1px solid #e5e7eb",
+            }}
         >
-            📎 {url.split("/").pop()}
+            📎 {a.url.split("/").pop()}
         </a>
     );
 }

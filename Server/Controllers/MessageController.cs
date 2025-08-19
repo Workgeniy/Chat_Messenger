@@ -39,23 +39,28 @@ public class MessagesController : ControllerBase
             .OrderByDescending(m => m.Sent)
             .Take(take)
             .OrderBy(m => m.Sent)
-            .Select(m => new
-            {
-                id = m.Id,
-                chatId = m.ChatId,
-                text = m.IsDeleted ? "Сообщение удалено" : m.Content,
-                senderId = m.SenderId,
-                sentUtc = m.Sent,
-                editedUtc = m.EditedUtc,
-                attachments = m.Attachments.Select(a => new { id = a.Id, url = a.StoragePath, contentType = a.MimeType }),
-                reactions = m.Reactions
-                    .GroupBy(r => r.Emoji)
-                    .Select(g => new {
-                        emoji = g.Key,
-                        count = g.Count(),
-                        mine = g.Any(r => r.UserId == userId)
-                    })
-            })
+           .Select(m => new
+           {
+               id = m.Id,
+               chatId = m.ChatId,
+               text = m.IsDeleted ? null : m.Content,  // ⚠️ не возвращаем «Сообщение удалено» как текст
+               isDeleted = m.IsDeleted,                // ⚠️ фронт покажет серую плашку
+               senderId = m.SenderId,
+               sentUtc = m.Sent,
+               editedUtc = m.EditedUtc,
+               attachments = m.Attachments.Select(a => new {
+                   id = a.Id,
+                   url = $"/api/attachments/{a.Id}",   // ✅ стабильный URL через контроллер
+                   contentType = a.MimeType
+               }),
+               reactions = m.Reactions
+        .GroupBy(r => r.Emoji)
+        .Select(g => new {
+            emoji = g.Key,
+            count = g.Count(),
+            mine = g.Any(r => r.UserId == userId)
+        })
+           })
             .ToListAsync();
 
         return Ok(list);
@@ -168,6 +173,10 @@ public class MessagesController : ControllerBase
     {
         var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
+        var msg = await _db.Messages.FindAsync(id);
+        if (msg == null) return NotFound();
+        if (msg.IsDeleted) return BadRequest("Нельзя ставить реакцию на удалённое сообщение."); // <--
+
         var exists = await _db.MessageReactions.FindAsync(id, userId, dto.Emoji);
         if (exists == null)
         {
@@ -179,34 +188,34 @@ public class MessagesController : ControllerBase
                 CreatedUtc = DateTime.UtcNow
             });
             await _db.SaveChangesAsync();
+
+            await _hub.Clients.Group($"chat:{msg.ChatId}")
+                .SendAsync("ReactionAdded", new { messageId = id, userId, emoji = dto.Emoji });
         }
-
-        var chatId = await _db.Messages.Where(m => m.Id == id).Select(m => m.ChatId).FirstAsync();
-
-        await _hub.Clients.Group($"chat:{chatId}")
-            .SendAsync("ReactionAdded", new { messageId = id, userId, emoji = dto.Emoji });
 
         return NoContent();
     }
-
-    public record ReactDto(string Emoji);
 
     [HttpDelete("{id:int}/react")]
     public async Task<IActionResult> Unreact(int id, [FromQuery] string emoji)
     {
         var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var r = await _db.MessageReactions.FindAsync(id, userId, emoji);
-        if (r == null) return NoContent();
 
-        _db.MessageReactions.Remove(r);
-        await _db.SaveChangesAsync();
+        var msg = await _db.Messages.FindAsync(id);
+        if (msg == null) return NotFound();
 
-        var chatId = await _db.Messages.Where(m => m.Id == id).Select(m => m.ChatId).FirstAsync();
-        await _hub.Clients.Group($"chat:{chatId}")
-            .SendAsync("ReactionRemoved", new { messageId = id, userId, emoji });
+        var rx = await _db.MessageReactions.FindAsync(id, userId, emoji);
+        if (rx != null)
+        {
+            _db.MessageReactions.Remove(rx);
+            await _db.SaveChangesAsync();
 
+            await _hub.Clients.Group($"chat:{msg.ChatId}")
+                .SendAsync("ReactionRemoved", new { messageId = id, userId, emoji });
+        }
         return NoContent();
     }
+
 
     [HttpDelete("{id:int}/react/{emoji}")]
     public async Task<IActionResult> RemoveReact(int id, string emoji)

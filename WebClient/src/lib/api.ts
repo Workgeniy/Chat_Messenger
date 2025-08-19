@@ -26,25 +26,55 @@ export type Msg = {
     text: string;
     senderId: number;
     sentUtc: string;
+    editedUtc?: string | null;
+    isDeleted?: boolean;
     attachments?: Array<{ id: number | string; url?: string; contentType?: string }>;
+    reactions?: { emoji: string; count: number; mine?: boolean }[];
+
+    delivered?: boolean;
+    readByMe?: boolean;
+    readCount?: number;
+    totalMembers?: number;
+};
+
+export type Participant = {
+    id: number;
+    name: string;
+    avatarUrl?: string | null;
+    isOnline?: boolean | null;
+    lastSeenUtc?: string | null;
+    lastSeenMessageId?: number | null;
 };
 
 export type StartChatResp = { id: number } | { chatId: number } | Chat;
 
 let token: string | null = null;
-export function setToken(t: string | null) {
-    token = t;
-}
+export function setToken(t: string | null) { token = t; }
 
 export type StoredAccount = { token: string; userId: number; name: string; avatarUrl?: string | null };
-
 export type MeDto = { id: number; name: string; email: string; avatarUrl?: string | null };
 export type LoginResp = { token: string; userId: number; displayName: string };
 export type RegisterResp = { id: number; email: string; name: string };
 
-// <-- ОБЯЗАТЕЛЬНО дефолт
-const API = import.meta.env.VITE_API_BASE || "/api";
+// ——— Топ-левел функции (оставляем как есть, чтобы не ломать импорты где-то ещё) ———
+export async function getChatMembers(chatId: number) {
+    const r = await fetch(`/api/chats/${chatId}/members`, { credentials: "include" });
+    if (!r.ok) throw new Error("getMembers failed");
+    return r.json(); // [{id,name,avatarUrl,isAdmin,lastSeenMessageId}]
+}
 
+export async function markSeen(chatId: number, upToMessageId: number) {
+    const r = await fetch(`/api/chats/${chatId}/seen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ upToMessageId })
+    });
+    if (!r.ok) throw new Error("markSeen failed");
+}
+
+// ——— База ———
+const API = import.meta.env.VITE_API_BASE || "/api";
 
 async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
@@ -58,8 +88,7 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
     async login(email: string, password: string): Promise<LoginResp> {
         const res = await fetch(`${API}/auth/login`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ email, password }),
         });
         if (!res.ok) throw new Error(await res.text());
@@ -68,8 +97,7 @@ export const api = {
 
     async register(name: string, email: string, password: string): Promise<RegisterResp> {
         const res = await fetch(`${API}/auth/register`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, email, password }),
         });
         if (!res.ok) throw new Error(await res.text());
@@ -103,10 +131,8 @@ export const api = {
 
     searchUsers: (q: string) => http<FoundUser[]>(`/users/search?q=${encodeURIComponent(q)}`),
 
-    // ВОЗВРАЩАЕМ ИМЕННО { chatId }, чтобы совпадало с UI
     startChatWith: (userId: number) =>
         http<Chat>(`/chats/startWith/${userId}`, { method: "POST" }),
-
 
     updateMe: (data: { name?: string; email?: string; password?: string }) =>
         http(`/users/me`, { method: "PUT", body: JSON.stringify(data) }),
@@ -116,17 +142,40 @@ export const api = {
         form.append("file", file);
         return http<{ avatarUrl: string }>(`/users/me/avatar`, { method: "POST", body: form });
     },
+
     editMessage: (id:number, text:string) =>
         http(`/messages/${id}`, { method: "PATCH", body: JSON.stringify({ text }) }),
+
     deleteMessage: (id:number) =>
         http(`/messages/${id}`, { method: "DELETE" }),
+
     react: (id:number, emoji:string) =>
         http(`/messages/${id}/react`, { method: "POST", body: JSON.stringify({ emoji }) }),
+
     unreact: (id:number, emoji:string) =>
         http(`/messages/${id}/react?emoji=${encodeURIComponent(emoji)}`, { method: "DELETE" }),
+
+    createChat: (name: string, memberIds: number[], avatarUrl?: string) =>
+        http<{ id:number; title:string; avatarUrl?:string; isGroup:true }>(
+            `/chats/create`,
+            { method: "POST", body: JSON.stringify({ name, memberIds, avatarUrl }) }
+        ),
+
+    // ← ВЕРНУЛ В ОБЪЕКТ
+    getChatMembers: (chatId: number) =>
+        http<{ id:number; name:string; avatarUrl?:string | null; isAdmin?: boolean; lastSeenMessageId?: number|null }[]>(
+            `/chats/${chatId}/members`
+        ),
+
+    // ← ВЕРНУЛ В ОБЪЕКТ
+    markSeen: (chatId: number, upToMessageId: number) =>
+        http(`/chats/${chatId}/seen`, { method: "POST", body: JSON.stringify({ upToMessageId }) }),
+
+    leaveChat: (chatId: number) =>
+        http(`/chats/${chatId}/leave`, { method: "POST" }),
 };
 
-// реальная загрузка с прогрессом
+// ——— Загрузка с прогрессом ———
 export async function uploadWithProgress(
     file: File,
     onProgress?: (p: number) => void
@@ -151,7 +200,7 @@ export async function uploadWithProgress(
             }
         };
         xhr.onerror = () => reject(new Error("Network error"));
-        xhr.onabort = () => reject(new Error("Upload aborted"));
+        xhr.onabort  = () => reject(new Error("Upload aborted"));
 
         const form = new FormData();
         form.append("file", file);

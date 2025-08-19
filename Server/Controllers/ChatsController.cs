@@ -2,7 +2,9 @@
 using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Server.Hubs;
 using System.Security.Claims;
 
 namespace Server.Controllers;
@@ -128,5 +130,65 @@ public class ChatsController : ControllerBase
 
         return Ok(new { id = chat.Id, title = chat.Name, avatarUrl = chat.AvatarUrl, isGroup = true });
     }
+
+    [HttpGet("{chatId:int}/members")]
+    public async Task<IActionResult> GetMembers(int chatId)
+    {
+        var members = await _db.ChatUsers
+            .Where(x => x.ChatId == chatId)
+            .Select(x => new {
+                id = x.UserId,
+                name = x.User!.Name,
+                avatarUrl = x.User.AvatarUrl,
+                isAdmin = x.IsAdmin,
+                lastSeenMessageId = x.LastSeenMessageId        // ← добавили
+            })
+            .ToListAsync();
+
+        return Ok(members);
+    }
+
+
+    [HttpPost("{chatId:int}/leave")]
+    public async Task<IActionResult> Leave(int chatId)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        var chatUser = await _db.ChatUsers.FindAsync(chatId, userId);
+        if (chatUser == null) return NotFound();
+
+        _db.ChatUsers.Remove(chatUser);
+        await _db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    public record SeenDto(int upToMessageId);
+
+    [HttpPost("{chatId:int}/seen")]
+    public async Task<IActionResult> Seen(int chatId, [FromBody] SeenDto dto,
+        [FromServices] IHubContext<ChatHub> hub)
+    {
+        var uid = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        var cu = await _db.ChatUsers.FirstOrDefaultAsync(x => x.ChatId == chatId && x.UserId == uid);
+        if (cu == null) return Forbid();
+
+        var newId = cu.LastSeenMessageId.HasValue
+            ? Math.Max(cu.LastSeenMessageId.Value, dto.upToMessageId)
+            : dto.upToMessageId;
+
+        cu.LastSeenMessageId = newId;
+        cu.LastSeenUtc = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        // уведомим остальных
+        await hub.Clients.Group($"chat:{chatId}")
+            .SendAsync("SeenUpdated", new { chatId, userId = uid, lastSeenMessageId = newId });
+
+        return NoContent();
+    }
+
 
 }

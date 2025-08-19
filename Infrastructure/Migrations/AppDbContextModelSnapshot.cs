@@ -150,6 +150,12 @@ namespace Infrastructure.Migrations
                     b.Property<bool>("IsAdmin")
                         .HasColumnType("boolean");
 
+                    b.Property<int?>("LastSeenMessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastSeenUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("UserId", "ChatId");
 
                     b.HasIndex("ChatId");
