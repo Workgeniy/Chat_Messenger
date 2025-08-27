@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Server.Hubs;
+using Server.Services;
 using System.Security.Claims;
 
 namespace Server.Controllers;
@@ -15,59 +16,81 @@ namespace Server.Controllers;
 public class ChatsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public ChatsController(AppDbContext db) => _db = db;
+    private readonly IHubContext<ChatHub> _hub;
+    private readonly IPresenceService _presence;
 
+    public ChatsController(AppDbContext db, IHubContext<ChatHub> hub, IPresenceService presence)
+    {
+        _db = db; _hub = hub; _presence = presence;
+    }
+
+    [Authorize]
     [HttpGet]
     public async Task<IActionResult> MyChats()
     {
-        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-        var chats = await _db.ChatUsers
-            .Where(cu => cu.UserId == userId)
-            .Select(cu => new
+        var items = await _db.Chats
+            .AsNoTracking()
+            .Where(c => c.ChatUsers.Any(u => u.UserId == me))
+            .Select(c => new
             {
-                id = cu.Chat.Id,
-                title = cu.Chat.IsGroup
-                    ? cu.Chat.Name
-                    : cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => x.User.Name).FirstOrDefault(),
-                avatarUrl = cu.Chat.IsGroup
-                    ? cu.Chat.AvatarUrl
-                    : cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => x.User.AvatarUrl).FirstOrDefault(),
-                isGroup = cu.Chat.IsGroup,
+                c.Id,
+                c.IsGroup,
+                Title = c.IsGroup
+                    ? c.Name
+                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.Name).FirstOrDefault(),
+                AvatarUrl = c.IsGroup
+                    ? c.AvatarUrl
+                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.AvatarUrl).FirstOrDefault(),
 
-                // если нет текста, но есть вложения — показываем «Вложение»
-                lastText = cu.Chat.Messages
+                OpponentId = c.IsGroup ? (int?)null
+                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.UserId).FirstOrDefault(),
+
+                IsOnline = c.IsGroup ? (bool?)null
+                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.IsOnline).FirstOrDefault(),
+                LastSeenUtc = c.IsGroup ? (DateTime?)null
+                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.LastSeenUtc).FirstOrDefault(),
+
+                LastMessage = c.Messages
                     .OrderByDescending(m => m.Sent)
-                    .Select(m => string.IsNullOrEmpty(m.Content)
-                        ? (m.Attachments.Any() ? "Вложение" : null)
-                        : m.Content)
-                    .FirstOrDefault(),
-                lastUtc = cu.Chat.Messages
-                    .OrderByDescending(m => m.Sent)
-                    .Select(m => (DateTime?)m.Sent)
-                    .FirstOrDefault(),
-                lastSenderId = cu.Chat.Messages
-                    .OrderByDescending(m => m.Sent)
-                    .Select(m => (int?)m.SenderId)
+                    .Select(m => new { m.Id, m.Sent, m.SenderId, m.Content })
                     .FirstOrDefault(),
 
-                // поля для онлайна ровно как ждёт фронт
-                isOnline = !cu.Chat.IsGroup
-                    ? cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => x.User.IsOnline).FirstOrDefault()
-                    : (bool?)null,
-                lastSeenUtc = !cu.Chat.IsGroup
-                    ? cu.Chat.ChatUsers.Where(x => x.UserId != userId)
-                        .Select(x => (DateTime?)x.User.LastSeenUtc).FirstOrDefault()
-                    : (DateTime?)null
+                // мой lastSeenId (0 если null)
+                MyLastSeenId = c.ChatUsers.Where(x => x.UserId == me)
+                                          .Select(x => (int?)x.LastSeenMessageId)
+                                          .FirstOrDefault() ?? 0,
+
+                // Непрочитанные = сообщения после моего lastSeen и не мои
+                UnreadCount = c.Messages.Count(m => m.Id >
+                                 (c.ChatUsers.Where(x => x.UserId == me)
+                                             .Select(x => (int?)x.LastSeenMessageId)
+                                             .FirstOrDefault() ?? 0)
+                               && m.SenderId != me)
             })
-            .OrderByDescending(x => x.lastUtc)
+            .OrderByDescending(x => x.LastMessage!.Sent)
             .ToListAsync();
 
-        return Ok(chats);
+        var result = items.Select(x => new
+        {
+            id = x.Id,
+            title = x.Title ?? "Диалог",
+            isGroup = x.IsGroup,
+            avatarUrl = x.AvatarUrl,
+            lastText = x.LastMessage?.Content,
+            lastUtc = x.LastMessage?.Sent,
+            lastSenderId = x.LastMessage?.SenderId,
+            opponentId = x.OpponentId,
+            isOnline = x.IsOnline,
+            lastSeenUtc = x.LastSeenUtc,
+            unreadCount = x.UnreadCount
+        });
+
+        return Ok(result);
     }
+
+
 
     [HttpPost("startWith/{peerId:int}")]
     public async Task<IActionResult> StartWith(int peerId)
@@ -75,61 +98,94 @@ public class ChatsController : ControllerBase
         var me = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         if (me == peerId) return BadRequest("Нельзя начать диалог с самим собой");
 
-        // ищем уже существующий 1:1
         var chatId = await _db.ChatUsers.Where(cu => cu.UserId == me).Select(cu => cu.ChatId)
             .Intersect(_db.ChatUsers.Where(cu => cu.UserId == peerId).Select(cu => cu.ChatId))
             .Where(cid => _db.Chats.Any(c => c.Id == cid && !c.IsGroup))
             .Cast<int?>()
             .FirstOrDefaultAsync();
 
+        var createdNow = false;
         if (chatId is null)
         {
-            var chat = new Chat { Name = null, IsGroup = false };
+            var chat = new Chat { Name = null, IsGroup = false, Created = DateTime.UtcNow };
             _db.Chats.Add(chat);
             await _db.SaveChangesAsync();
 
+            var maxId = 0; // только что созданный чат
             _db.ChatUsers.AddRange(
-                new ChatUser { ChatId = chat.Id, UserId = me, Created = DateTime.UtcNow },
-                new ChatUser { ChatId = chat.Id, UserId = peerId, Created = DateTime.UtcNow }
+                new ChatUser { ChatId = chat.Id, UserId = me, Created = DateTime.UtcNow, LastSeenMessageId = maxId },
+                new ChatUser { ChatId = chat.Id, UserId = peerId, Created = DateTime.UtcNow, LastSeenMessageId = maxId }
             );
             await _db.SaveChangesAsync();
+
             chatId = chat.Id;
+            createdNow = true;
+
+            // Подключим активные соединения адресата к группе чата
+            foreach (var conn in _presence.GetConnections(peerId))
+                await _hub.Groups.AddToGroupAsync(conn, $"chat:{chat.Id}");
+
+            // Данные для карточки у адресата: соперник — инициатор (me)
+            var meUser = await _db.Users.AsNoTracking().FirstAsync(u => u.Id == me);
+
+            await _hub.Clients.Group($"user:{peerId}").SendAsync("ChatCreated", new
+            {
+                id = chat.Id,
+                title = meUser.Name ?? $"User#{meUser.Id}",
+                avatarUrl = meUser.AvatarUrl,
+                isGroup = false,
+                opponentId = me,                    // ← важно для presence
+                isOnline = meUser.IsOnline,         // снимок
+                lastSeenUtc = meUser.LastSeenUtc,
+                lastText = (string?)null,
+                lastUtc = (DateTime?)null,
+                lastSenderId = (int?)null,
+                unreadCount = 0
+            });
         }
 
         var peer = await _db.Users.AsNoTracking().FirstAsync(u => u.Id == peerId);
         return Ok(new
         {
-            id = chatId.Value,
+            id = chatId!.Value,
             title = peer.Name ?? $"User#{peer.Id}",
             avatarUrl = peer.AvatarUrl,
-            isGroup = false
+            isGroup = false,
+            opponentId = peerId
         });
     }
 
-    public record CreateChatDto(string name, List<int> memberIds, string? avatarUrl);
+
+public record CreateChatDto(string name, List<int> memberIds, string? avatarUrl);
 
     [HttpPost("create")]
     public async Task<IActionResult> Create([FromBody] CreateChatDto dto)
     {
         var me = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var chat = new Chat { Name = dto.name, IsGroup = true, AvatarUrl = dto.avatarUrl };
+        var chat = new Chat { Name = dto.name, IsGroup = true, AvatarUrl = dto.avatarUrl, Created = DateTime.UtcNow };
         _db.Chats.Add(chat);
         await _db.SaveChangesAsync();
 
         var ids = dto.memberIds.Distinct().Where(id => id != me).ToList();
         var members = ids.Append(me).Distinct().ToList();
 
+        // перед добавлением участников узнаём текущий maxId (обычно 0 для только что созданного)
+        var maxId = await _db.Messages.Where(m => m.ChatId == chat.Id)
+                                      .MaxAsync(m => (int?)m.Id) ?? 0;
+
         _db.ChatUsers.AddRange(members.Select(uid => new ChatUser
         {
             ChatId = chat.Id,
             UserId = uid,
             IsAdmin = uid == me,
-            Created = DateTime.UtcNow
+            Created = DateTime.UtcNow,
+            LastSeenMessageId = maxId
         }));
         await _db.SaveChangesAsync();
 
         return Ok(new { id = chat.Id, title = chat.Name, avatarUrl = chat.AvatarUrl, isGroup = true });
     }
+
 
     [HttpGet("{chatId:int}/members")]
     public async Task<IActionResult> GetMembers(int chatId)

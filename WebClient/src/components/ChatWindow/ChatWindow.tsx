@@ -1,11 +1,10 @@
-// src/components/ChatWindow/ChatWindow.tsx
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import "dayjs/locale/ru";
 import localizedFormat from "dayjs/plugin/localizedFormat";
 dayjs.locale("ru");
 dayjs.extend(localizedFormat);
-
 import styles from "./ChatWindow.module.css";
 import { Attachment } from "./Attachment";
 import { AttachedChip } from "./AttachedChip";
@@ -31,12 +30,13 @@ type Participant = {
     id: number;
     name: string;
     avatarUrl?: string | null;
-    lastSeenMessageId?: number | null;   // ✅ добавлено
+    lastSeenMessageId?: number | null;
 };
 
 type Props = {
     title?: string;
     avatarUrl?: string;
+    myAvatarUrl?: string;
     userId: number;
     messages: Msg[];
 
@@ -59,6 +59,8 @@ type Props = {
 
     onSeen?: (upToMessageId: number) => void;
 };
+
+const MENU_PADDING = 8;
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "👏", "😍", "😎", "🎉"];
 
@@ -110,48 +112,21 @@ export default function ChatWindow(props: Props) {
         if (!el) return;
         shouldStickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     });
+    useEffect(() => { if (shouldStickRef.current) stickToBottom(); }, [messages.length]);
+    useEffect(() => { stickToBottom(true); }, []);
 
-    useLayoutEffect(() => {
-        if (shouldStickRef.current) bottomRef.current?.scrollIntoView({ block: "end" });
-    }, [messages.length]);
-
-    useLayoutEffect(() => {
-        bottomRef.current?.scrollIntoView({ block: "end" });
-    }, []);
-
-    /** Закрытие меню (контекст/шапка) */
-    useEffect(() => {
-        const onDown = (e: MouseEvent) => {
-            if (!headMenuOpen) return;
-            const t = e.target as Node;
-            if (headMenuRef.current && !headMenuRef.current.contains(t)) {
-                setHeadMenuOpen(false);
-            }
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                setHeadMenuOpen(false);
-                setMenuFor(null);
-            }
-        };
-        document.addEventListener("mousedown", onDown);
-        window.addEventListener("keydown", onKey);
-        return () => {
-            document.removeEventListener("mousedown", onDown);
-            window.removeEventListener("keydown", onKey);
-        };
-    }, [headMenuOpen]);
-
-    useEffect(() => {
-        const onPointerDown = (e: PointerEvent) => {
-            if (menuFor === null) return;
-            const t = e.target as HTMLElement;
-            if (menuRef.current && menuRef.current.contains(t)) return;
-            requestAnimationFrame(() => setMenuFor(null));
-        };
-        document.addEventListener("pointerdown", onPointerDown);
-        return () => document.removeEventListener("pointerdown", onPointerDown);
-    }, [menuFor]);
+    function stickToBottom(force = false) {
+        const el = listRef.current;
+        if (!el) return;
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        if (force || near) {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    el.scrollTop = el.scrollHeight;
+                });
+            });
+        }
+    }
 
     /** Подгрузка истории */
     async function onScroll() {
@@ -164,6 +139,28 @@ export default function ChatWindow(props: Props) {
             el.scrollTop = el.scrollTop + added;
         }
     }
+
+    useEffect(() => {
+        const close = () => setMenuFor(null);
+        const onResize = () => {
+            // если меню открыто — переклампим позицию к центру окна
+            if (menuFor !== null) {
+                const centerEvt = { clientX: window.innerWidth - MENU_PADDING, clientY: window.innerHeight - MENU_PADDING } as MouseEvent;
+                openMenuAt(centerEvt, menuFor);
+            }
+        };
+        window.addEventListener("resize", onResize);
+        return () => window.removeEventListener("resize", onResize);
+    }, [menuFor]);
+
+// закрываем при скролле списка (и в родителе)
+    useEffect(() => {
+        const el = listRef.current;
+        if (!el) return;
+        const onScrollHide = () => setMenuFor(null);
+        el.addEventListener("scroll", onScrollHide, { passive: true });
+        return () => el.removeEventListener("scroll", onScrollHide);
+    }, []);
 
     /** Input */
     function keyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -206,93 +203,184 @@ export default function ChatWindow(props: Props) {
         onSeen(messages[messages.length - 1].id);
     }, [messages.length]);
 
+
+// универсальный опенер контекст-меню, клампит позицию
+    function openMenuAt(e: MouseEvent | React.MouseEvent, id: number) {
+        // сначала ставим черновую позицию, чтобы элемент отрендерился и у него появились размеры
+        setMenuFor(id);
+        setMenuPos({ x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY });
+
+        // после рендера узнаём размеры и клампим
+        requestAnimationFrame(() => {
+            const el = menuRef.current;
+            if (!el) return;
+
+            const w = el.offsetWidth;
+            const h = el.offsetHeight;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+
+            let x = (e as MouseEvent).clientX;
+            let y = (e as MouseEvent).clientY;
+
+            // если не влезает вправо/вниз — двигаем влево/вверх
+            if (x + w + MENU_PADDING > vw) x = Math.max(MENU_PADDING, vw - w - MENU_PADDING);
+            if (y + h + MENU_PADDING > vh) y = Math.max(MENU_PADDING, vh - h - MENU_PADDING);
+
+            // если слишком близко к левому/верхнему краю — даём минимальный отступ
+            if (x < MENU_PADDING) x = MENU_PADDING;
+            if (y < MENU_PADDING) y = MENU_PADDING;
+
+            setMenuPos({ x, y });
+        });
+    }
+
+    // закрыть контекстное меню по клику вне и по Escape
+    useEffect(() => {
+        if (menuFor === null) return;
+
+        const onDocMouseDown = (e: MouseEvent) => {
+            const t = e.target as Node;
+            // если клик внутри меню — не закрываем
+            if (menuRef.current && menuRef.current.contains(t)) return;
+            setMenuFor(null);
+        };
+
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setMenuFor(null);
+        };
+
+        document.addEventListener("mousedown", onDocMouseDown); // bubbling (по умолчанию)
+        document.addEventListener("keydown", onKey);
+
+        return () => {
+            document.removeEventListener("mousedown", onDocMouseDown);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [menuFor]);
+
+
     /** Рендер сообщения */
     function renderMessage(m: Msg) {
         const mine = m.senderId === userId;
         const isEditing = editingId === m.id;
         const others = (members ?? []).filter(u => u.id !== userId);
         const seenCount = others.filter(u => (u.lastSeenMessageId ?? 0) >= m.id).length;
-        const seenAll = others.length > 0 && seenCount === others.length;
-        const seenAny = seenCount > 0;
 
         return (
-            <div
-                key={m.id}
-                className={`${styles.bubble} ${mine ? styles.mine : styles.their}`}
-                onClick={(e) => {
-                    if (m.isDeleted) return;
-                    e.stopPropagation();
-                    setMenuFor(m.id);
-                    setMenuPos({ x: e.clientX, y: e.clientY });
-                }}
-                onContextMenu={(e) => {
-                    if (m.isDeleted) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setMenuFor(m.id);
-                    setMenuPos({ x: e.clientX, y: e.clientY });
-                }}
-            >
-                {m.isDeleted ? (
-                    <div className={styles.deleted}>Сообщение удалено</div>
-                ) : isEditing ? (
-                    <div className={styles.editWrap} onClick={(e) => e.stopPropagation()}>
-                        <input
-                            className={styles.editInput}
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                    const nt = editText.trim();
-                                    if (nt && nt !== m.text && onEdit) {
-                                        Promise.resolve(onEdit(m.id, nt)).finally(() => {
-                                            setEditingId(null); setEditText(""); setMenuFor(null);
-                                        });
-                                    } else { setEditingId(null); setEditText(""); setMenuFor(null); }
-                                }
-                                if (e.key === "Escape") { setEditingId(null); setEditText(""); setMenuFor(null); }
-                            }}
-                            autoFocus
-                            placeholder="Изменить сообщение"
-                        />
-                    </div>
-                ) : (
-                    <>
-                        {m.text && <div>{m.text}</div>}
-                        {m.attachments?.length ? (
-                            <div className={styles.attachments} onClick={(e) => e.stopPropagation()}>
-                                {m.attachments.map((a) => <Attachment key={String(a.id)} a={a} />)}
-                            </div>
-                        ) : null}
-                    </>
-                )}
-
-                {!m.isDeleted && !!m.reactions?.length && (
-                    <div className={styles.reactionsRow} onClick={(e) => e.stopPropagation()}>
-                        {m.reactions.map((r) => (
-                            <button
-                                type="button"
-                                key={r.emoji}
-                                className={`${styles.reaction} ${r.mine ? styles.reactionMine : ""}`}
-                                onClick={() => {
-                                    if (r.mine && onUnreact) onUnreact(m.id, r.emoji);
-                                    else if (onReact) onReact(m.id, r.emoji);
+            <div key={m.id} className={`${styles.msgRow} ${mine ? styles.rowMine : styles.rowTheir}`}>
+                <div
+                    className={`${styles.bubble} ${mine ? styles.mine : styles.their} ${mine ? styles.tailRight : styles.tailLeft}`}
+                    onMouseDown={(e) => {
+                        if (m.isDeleted || editingId !== null) return;
+                        e.stopPropagation();
+                        openMenuAt(e.nativeEvent, m.id);
+                    }}
+                    onContextMenu={(e) => {
+                        if (m.isDeleted || editingId !== null) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openMenuAt(e.nativeEvent, m.id);
+                    }}
+                >
+                    {m.isDeleted ? (
+                        <div className={styles.deleted}>Сообщение удалено</div>
+                    ) : isEditing ? (
+                        <div className={styles.editWrap} onClick={(e) => e.stopPropagation()}>
+                            <input
+                                className={styles.editInput}
+                                value={editText}
+                                onChange={(e) => setEditText(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        const nt = editText.trim();
+                                        if (nt && nt !== m.text && onEdit) {
+                                            Promise.resolve(onEdit(m.id, nt)).finally(() => {
+                                                setEditingId(null);
+                                                setEditText("");
+                                                setMenuFor(null);
+                                            });
+                                        } else {
+                                            setEditingId(null);
+                                            setEditText("");
+                                            setMenuFor(null);
+                                        }
+                                    }
+                                    if (e.key === "Escape") {
+                                        setEditingId(null);
+                                        setEditText("");
+                                        setMenuFor(null);
+                                    }
                                 }}
-                            >
-                                {r.emoji} {r.count > 1 ? r.count : ""}
-                            </button>
-                        ))}
-                    </div>
-                )}
-
-                <div className={styles.time}>
-                    {dayjs(m.sentUtc).format("HH:mm")}
-                    {m.editedUtc ? <span className={styles.edited}>&nbsp;(изменено)</span> : null}
-                    {m.senderId === userId && (
-                        <span className={`${styles.ticks} ${seenAll ? styles.seenAll : seenAny ? styles.seenSome : ""}`}>
-              {seenAny ? "✓✓" : "✓"}
-            </span>
+                                autoFocus
+                                placeholder="Изменить сообщение"
+                            />
+                            <div className={styles.editActions}>
+                                <button
+                                    onClick={() => {
+                                        const nt = editText.trim();
+                                        if (nt && nt !== m.text && onEdit) {
+                                            Promise.resolve(onEdit(m.id, nt)).finally(() => {
+                                                setEditingId(null);
+                                                setEditText("");
+                                                setMenuFor(null);
+                                            });
+                                        } else {
+                                            setEditingId(null);
+                                            setEditText("");
+                                            setMenuFor(null);
+                                        }
+                                    }}
+                                >
+                                    Сохранить
+                                </button>
+                                <button onClick={() => { setEditingId(null); setEditText(""); setMenuFor(null); }}>
+                                    Отмена
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            {m.text && <div className={styles.text}>{m.text}</div>}
+                            {m.attachments?.length ? (
+                                <div className={styles.attachments} onClick={(e) => e.stopPropagation()}>
+                                    {m.attachments.map((a) => <Attachment key={String(a.id)} a={a} />)}
+                                </div>
+                            ) : null}
+                        </>
                     )}
+
+                    {/* Реакции под текстом */}
+                    {!!m.reactions?.length && (
+                        <div className={styles.reactionsRow} onMouseDown={(e) => e.stopPropagation()}>
+                            {m.reactions.map((r) => (
+                                <button
+                                    type="button"
+                                    key={r.emoji}
+                                    className={`${styles.reaction} ${r.mine ? styles.reactionMine : ""}`}
+                                    title={r.mine ? "Убрать реакцию" : "Поставить реакцию"}
+                                    onMouseDown={(ev) => {
+                                        ev.preventDefault();
+                                        ev.stopPropagation();
+                                        if (r.mine && onUnreact) onUnreact(m.id, r.emoji);
+                                        else if (onReact) onReact(m.id, r.emoji);
+                                    }}
+                                >
+                                    {r.emoji} {r.count > 1 ? r.count : ""}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* мета справа снизу */}
+                    <span className={styles.metaRight}>
+            {dayjs(m.sentUtc).format("HH:mm")}
+                        {m.senderId === userId && (
+                            <span className={`${styles.ticks} ${seenCount > 0 ? styles.double : styles.single}`}>
+                {seenCount > 0 ? " ✓✓" : " ✓"}
+              </span>
+                        )}
+          </span>
                 </div>
             </div>
         );
@@ -303,42 +391,25 @@ export default function ChatWindow(props: Props) {
             {/* Header */}
             <header className={styles.header}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {avatarUrl && <img src={avatarUrl} alt="" style={{ width: 32, height: 32, borderRadius: "50%" }} />}
-                    <span>{title ?? "Выберите чат"}</span>
-                </div>
-                {!!typingUsers.length && <span className={styles.typing}>{typingUsers.join(", ")} печатает…</span>}
-                <div className={styles.headerActions} ref={headMenuRef}>
-                    <button type="button" className={styles.kebabBtn} onClick={() => setHeadMenuOpen(v => !v)}>⋯</button>
-                    {headMenuOpen && (
-                        <div className={styles.dropdown}>
-                            {isGroup && members?.length ? (
-                                <>
-                                    <div className={styles.menuSectionTitle}>Участники</div>
-                                    <div className={styles.usersList}>
-                                        {members.map(u => (
-                                            <button
-                                                type="button"
-                                                key={u.id}
-                                                className={styles.userItem}
-                                                onClick={() => { setHeadMenuOpen(false); onDirectMessage?.(u.id); }}
-                                            >
-                                                {u.avatarUrl
-                                                    ? <img src={u.avatarUrl} alt="" className={styles.userAvatar} />
-                                                    : <div className={styles.userAvatarFallback}>{u.name?.[0] ?? "U"}</div>}
-                                                <span className={styles.userName}>{u.name}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className={styles.menuLine} />
-                                </>
-                            ) : null}
-                            {isGroup && onLeaveChat && (
-                                <button type="button" className={`${styles.menuItem} ${styles.danger}`} onClick={() => { setHeadMenuOpen(false); onLeaveChat(); }}>
-                                    Выйти из беседы
-                                </button>
-                            )}
+                    {avatarUrl && (
+                        <div style={{ position: "relative" }}>
+                            <img
+                                src={avatarUrl}
+                                alt=""
+                                style={{ width: 32, height: 32, borderRadius: "50%" }}
+                            />
+                            {/* если хочешь зелёную точку и тут — добавь */}
+                            {/* <span className={styles.dotHeader} /> */}
                         </div>
                     )}
+                    <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
+                        <span>{title ?? "Выберите чат"}</span>
+                        {!!typingUsers.length && (
+                            <span className={styles.typing} style={{ fontSize: 12 }}>
+          {typingUsers.join(", ")} печатает…
+        </span>
+                        )}
+                    </div>
                 </div>
             </header>
 
@@ -354,14 +425,26 @@ export default function ChatWindow(props: Props) {
 
             {/* Context menu */}
             {menuFor !== null && (
-                <div ref={menuRef} className={styles.ctxMenu} style={{ left: menuPos.x, top: menuPos.y }}>
+                <div ref={menuRef} className={styles.ctxMenu} style={{ left: menuPos.x, top: menuPos.y }} onMouseDown={(e) => e.stopPropagation()}>
                     <div className={styles.emojiGrid}>
                         {EMOJIS.map((e) => (
-                            <button type="button" key={e} className={styles.emojiBtn} onClick={() => { onReact?.(menuFor, e); setMenuFor(null); }}>
+                            <button
+                                type="button"
+                                key={e}
+                                className={styles.emojiBtn}
+                                onMouseDown={(ev) => {
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    const id = menuFor!;
+                                    onReact?.(id, e);
+                                    setMenuFor(null);
+                                }}
+                            >
                                 {e}
                             </button>
                         ))}
                     </div>
+
                     <div className={styles.menuLine} />
                     {(() => {
                         const m = messages.find((x) => x.id === menuFor);
@@ -370,12 +453,31 @@ export default function ChatWindow(props: Props) {
                         return (
                             <div className={styles.menuActions}>
                                 {mine && onEdit && (
-                                    <button type="button" className={styles.menuBtn} onClick={() => { setEditingId(m.id); setEditText(m.text ?? ""); setMenuFor(null); }}>
+                                    <button
+                                        type="button"
+                                        className={styles.menuBtn}
+                                        onMouseDown={(ev) => {
+                                            ev.preventDefault();
+                                            ev.stopPropagation();
+                                            setEditingId(m.id);
+                                            setEditText(m.text ?? "");
+                                            setMenuFor(null);
+                                        }}
+                                    >
                                         ✏️ Редактировать
                                     </button>
                                 )}
                                 {mine && onDelete && (
-                                    <button type="button" className={`${styles.menuBtn} ${styles.danger}`} onClick={() => { setMenuFor(null); onDelete(m.id); }}>
+                                    <button
+                                        type="button"
+                                        className={`${styles.menuBtn} ${styles.danger}`}
+                                        onMouseDown={(ev) => {
+                                            ev.preventDefault();
+                                            ev.stopPropagation();
+                                            setMenuFor(null);
+                                            onDelete?.(m.id);
+                                        }}
+                                    >
                                         🗑 Удалить
                                     </button>
                                 )}

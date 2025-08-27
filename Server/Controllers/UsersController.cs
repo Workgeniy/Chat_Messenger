@@ -1,4 +1,5 @@
-﻿using Infrastructure;
+﻿using Core.DTO;
+using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -14,8 +15,8 @@ public class UsersController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
-    private readonly Hub _hub;
-    public UsersController(AppDbContext db, IWebHostEnvironment env, Hub<ChatHub> hub) { _db = db; _env = env; _hub = hub; }
+
+    public UsersController(AppDbContext db, IWebHostEnvironment env) { _db = db; _env = env; }
 
     [Authorize]
     [HttpGet("me")]
@@ -38,12 +39,15 @@ public class UsersController : ControllerBase
         if (u == null) return NotFound();
 
         if (!string.IsNullOrWhiteSpace(dto.Name)) u.Name = dto.Name;
-        if (!string.IsNullOrWhiteSpace(dto.Email)) u.Email = dto.Email;
-        if (!string.IsNullOrWhiteSpace(dto.Password)) u.Password = dto.Password; // TODO: заменить на хэш
+        if (!string.IsNullOrWhiteSpace(dto.Email)) u.Email = dto.Email.Trim();
+
+        if (!string.IsNullOrWhiteSpace(dto.Password))
+            u.Password = BCrypt.Net.BCrypt.HashPassword(dto.Password);
 
         await _db.SaveChangesAsync();
         return Ok(new { ok = true });
     }
+
 
     [Authorize]
     [HttpPost("me/avatar")]
@@ -84,13 +88,15 @@ public class UsersController : ControllerBase
         var users = await _db.Users
             .AsNoTracking()
             .Where(u => u.Id != me &&
-                        (q == "" ||
-                         EF.Functions.ILike(u.Name!, $"%{q}%") ||
-                         EF.Functions.ILike(u.Email!, $"%{q}%")))
-            .OrderBy(u => u.Name)
+                (q == "" ||
+                 EF.Functions.ILike(u.Login!, $"%{q}%") ||
+                 EF.Functions.ILike(u.Name!, $"%{q}%") ||
+                 EF.Functions.ILike(u.Email!, $"%{q}%")))
+            .OrderBy(u => u.Login)
             .Take(Math.Clamp(take, 1, 50))
             .Select(u => new {
                 id = u.Id,
+                login = u.Login,
                 name = u.Name,
                 email = u.Email,
                 avatarUrl = u.AvatarUrl
@@ -109,7 +115,7 @@ public class UsersController : ControllerBase
             .Select(x => new {
                 id = x.UserId,
                 name = x.User!.Name,
-                avatarUrl = x.User.AvatarUrl,       // подкорректируй, если у тебя другое поле
+                avatarUrl = x.User.AvatarUrl,    
                 lastSeenMessageId = x.LastSeenMessageId
             })
             .ToListAsync();
@@ -144,4 +150,46 @@ public class UsersController : ControllerBase
 
         return NoContent();
     }
+
+    [Authorize]
+    [HttpPut("me/email")]
+    public async Task<IActionResult> ChangeEmail([FromBody] ChangeEmailDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
+            return BadRequest("Email и пароль обязательны.");
+
+        var uid = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == uid);
+        if (u == null) return NotFound();
+
+        if (!BCrypt.Net.BCrypt.Verify(dto.Password, u.Password))
+            return Problem(statusCode: 403, detail: "Неверный пароль.");
+
+        u.Email = dto.Email.Trim();
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true, email = u.Email });
+    }
+
+    [Authorize]
+    [HttpPut("me/password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.CurrentPassword) || string.IsNullOrWhiteSpace(dto.NewPassword))
+            return BadRequest("Текущий и новый пароли обязательны.");
+
+        if (dto.NewPassword.Length < 6)
+            return BadRequest("Новый пароль слишком короткий.");
+
+        var uid = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == uid);
+        if (u == null) return NotFound();
+
+        if (!BCrypt.Net.BCrypt.Verify(dto.CurrentPassword, u.Password))
+            return Problem(statusCode: 403, detail: "Неверный текущий пароль.");
+
+        u.Password = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true });
+    }
+
 }

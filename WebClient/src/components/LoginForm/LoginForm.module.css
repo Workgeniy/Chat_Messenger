@@ -22,3 +22,23 @@
     padding: 0 2px;
 }
 .link:hover { text-decoration: underline; }
+
+.card {
+    width: 420px;
+    max-width: 92vw;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(2,6,23,.12);
+    padding: 18px 16px;
+    display: grid;
+    gap: 8px;
+}
+
+.centerWrap {
+    min-height: 100vh;
+    width: 100%;
+    display: grid;
+    place-items: center;
+    background: #f5f6f8;
+}

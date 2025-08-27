@@ -50,7 +50,17 @@ namespace Infrastructure
 
             // Индексы
             modelBuilder.Entity<Message>().HasIndex(m => new { m.ChatId, m.Sent });
-            modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+
+            modelBuilder.Entity<User>(b =>
+            {
+                b.Property(x => x.Login).IsRequired().HasMaxLength(50);
+                b.HasIndex(x => x.Login).IsUnique();
+
+                b.Property(x => x.Email).IsRequired(false).HasMaxLength(255);
+                b.HasIndex(x => x.Email).IsUnique();
+            });
+
+
 
             // REACTIONS
             modelBuilder.Entity<MessageReaction>()

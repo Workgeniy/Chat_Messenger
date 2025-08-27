@@ -82,21 +82,53 @@ using (var scope = app.Services.CreateScope())
 static async Task SeedDemoDataAsync(AppDbContext db)
 {
     // 1) пользователи
+    // 1) пользователи (с логинами и хэш-паролями)
+    var pwdHash = BCrypt.Net.BCrypt.HashPassword("Passw0rd!");
+
+    // ALICE
     var alice = await db.Users.FirstOrDefaultAsync(u => u.Email == "alice@example.com");
     if (alice == null)
     {
-        alice = new User { Name = "Alice", Email = "alice@example.com", Password = "Passw0rd!" };
+        alice = new User
+        {
+            Login = "alice",
+            Name = "Alice",
+            Email = "alice@example.com",
+            Password = pwdHash
+        };
         db.Users.Add(alice);
         await db.SaveChangesAsync();
     }
+    else if (string.IsNullOrWhiteSpace(alice.Login))
+    {
+        alice.Login = "alice";
+        if (!alice.Password.StartsWith("$2")) // на случай старых данных без хэша
+            alice.Password = pwdHash;
+        await db.SaveChangesAsync();
+    }
 
+    // BOB
     var bob = await db.Users.FirstOrDefaultAsync(u => u.Email == "bob@example.com");
     if (bob == null)
     {
-        bob = new User { Name = "Bob", Email = "bob@example.com", Password = "Passw0rd!" };
+        bob = new User
+        {
+            Login = "bob",
+            Name = "Bob",
+            Email = "bob@example.com",
+            Password = pwdHash
+        };
         db.Users.Add(bob);
         await db.SaveChangesAsync();
     }
+    else if (string.IsNullOrWhiteSpace(bob.Login))
+    {
+        bob.Login = "bob";
+        if (!bob.Password.StartsWith("$2"))
+            bob.Password = pwdHash;
+        await db.SaveChangesAsync();
+    }
+
 
     // 2) чат между ними (ищем диалог с этими двумя участниками)
     var chat = await db.Chats

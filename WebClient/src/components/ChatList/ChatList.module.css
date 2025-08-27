@@ -50,3 +50,18 @@
     white-space: nowrap;
     margin-top: 2px;
 }
+.unreadBadge {
+    background: #4473ff;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    min-width: 20px;
+    text-align: center;
+    margin-left: auto;
+}
+.typing {
+    color: #16a34a;        /* зелёным, чтобы заметнее */
+    font-style: italic;
+}

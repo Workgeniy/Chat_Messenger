@@ -22,13 +22,29 @@ namespace Server.Hubs
         {
             var userId = GetUserId();
             if (userId is null) return;
+
             _presence.Connected(userId.Value, Context.ConnectionId);
 
-            // сообщим всем: пользователь онлайн
-            await Clients.All.SendAsync("PresenceChanged", new { userId, isOnline = true, lastSeenUtc = (DateTime?)null });
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{userId.Value}");
+            // ✅ подписываем соединение на все чаты пользователя
+            var chatIds = await _db.ChatUsers
+                .Where(cu => cu.UserId == userId.Value)
+                .Select(cu => cu.ChatId)
+                .ToListAsync();
+
+            foreach (var cid in chatIds)
+                await Groups.AddToGroupAsync(Context.ConnectionId, Group(cid));
+
+            await Clients.Caller.SendAsync("PresenceSnapshot", _presence
+                .GetOnlineUserIds()
+                .Select(id => new { userId = id, isOnline = true, lastSeenUtc = (DateTime?)null }));
+
+            await Clients.All.SendAsync("PresenceChanged",
+                new { userId, isOnline = true, lastSeenUtc = (DateTime?)null });
 
             await base.OnConnectedAsync();
         }
+
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {

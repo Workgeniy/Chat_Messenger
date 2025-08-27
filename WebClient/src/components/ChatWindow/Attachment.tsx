@@ -1,52 +1,70 @@
-// Attachment.tsx — обнови
-type Props = { a: { id: number | string; url?: string; contentType?: string } };
+import styles from "./Attachment.module.css";
 
-export function Attachment({ a }: Props) {
-    if (!a.url) return null;
-    const type = a.contentType?.toLowerCase() || "";
+type A = {
+    id: number | string;
+    url?: string;
+    thumbUrl?: string;
+    contentType?: string;
+    fileName?: string;
+    sizeBytes?: number;
+};
 
-    if (type.startsWith("image/")) {
-        return (
-            <a href={a.url} target="_blank" rel="noreferrer">
-                <img
-                    src={a.url}
-                    loading="lazy"
-                    alt="attachment"
-                    style={{ maxWidth: 220, maxHeight: 220, objectFit: "cover", borderRadius: 8 }}
-                />
-            </a>
-        );
-    }
+export function humanSize(bytes?: number) {
+    if (!bytes && bytes !== 0) return "";
+    const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+    let i = 0, n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
 
-    if (type.startsWith("video/")) {
-        return (
-            <video
-                controls
-                preload="metadata"
-                style={{ maxWidth: 360, maxHeight: 360, borderRadius: 8 }}
-            >
-                <source src={a.url} type={type || "video/mp4"} />
-            </video>
-        );
-    }
+export function Attachment({ a }: { a: A }) {
+    const isImage = (a.contentType || "").startsWith("image/");
+    const isVideo = (a.contentType || "").startsWith("video/");
+
+    const name = a.fileName || `file_${a.id}`;
+    const size = humanSize(a.sizeBytes);
 
     return (
-        <a
-            href={a.url}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "4px 8px",
-                background: "#f1f5f9",
-                borderRadius: 6,
-                textDecoration: "none",
-                color: "#111827",
-                border: "1px solid #e5e7eb",
-            }}
-        >
-            📎 {a.url.split("/").pop()}
-        </a>
+        <div className={styles.card}>
+            <div className={styles.previewBox}>
+                {isImage ? (
+                    <img
+                        src={a.url || a.thumbUrl}
+                        alt={name}
+                        className={styles.thumb}
+                    />
+                ) : isVideo ? (
+                    <video
+                        className={styles.video}
+                        src={a.url}
+                        poster={a.thumbUrl || undefined}
+                        controls
+                    />
+                ) : (
+                    <div className={styles.fileIcon}>📄</div>
+                )}
+
+                {a.url && (
+                    <a
+                        className={styles.downloadBtn}
+                        href={a.url}
+                        download
+                        title="Скачать"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        ⬇
+                    </a>
+                )}
+            </div>
+
+            <div className={styles.meta}>
+                <div className={styles.name} title={name}>{name}</div>
+                <div className={styles.sub}>
+                    {a.contentType || "файл"}{size ? ` · ${size}` : ""}
+                </div>
+            </div>
+        </div>
     );
 }
+
+export default Attachment;

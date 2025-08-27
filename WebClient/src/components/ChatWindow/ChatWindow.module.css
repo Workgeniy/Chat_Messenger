@@ -1,208 +1,227 @@
-/* ==== Корень / список / композер ==== */
-.root { display:flex; flex-direction:column; height:100vh; background:#f5f6f9; position:relative; }
-.header { background:#fff; border-bottom:1px solid #eceff3; padding:12px 16px; font-weight:600; display:flex; align-items:center; gap:12px; }
-.typing { font-weight:400; font-size:12px; color:#6b7280; margin-left:auto; }
-.list { flex:1; overflow:auto; padding:12px 10px; display:flex; flex-direction:column; gap:6px; }
-
-.composer { position:relative; display:flex; gap:8px; padding:10px; border-top:1px solid #eceff3; background:#fff; }
-.attach { display:inline-flex; align-items:center; justify-content:center; width:40px; border:1px dashed #c9d1e0; border-radius:10px; cursor:pointer; user-select:none; }
-.attach:hover { background:#f3f5fb; }
-.input { flex:1; border:1px solid #d6dbe1; border-radius:12px; padding:10px 12px; outline:none; }
-.input:focus { border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
-.send { background:#4473ff; color:#fff; border:none; border-radius:12px; padding:10px 14px; cursor:pointer; }
-
-/* ==== Участники в шапке ==== */
-.members { display:flex; align-items:center; gap:6px; margin-left:auto; }
-.memberBtn { border:none; background:transparent; padding:0; cursor:pointer; }
-.memberAvatar { width:28px; height:28px; border-radius:50%; object-fit:cover; }
-.leaveBtn { margin-left:6px; border:1px solid #ef4444; background:#fff; color:#ef4444; border-radius:8px; padding:4px 8px; cursor:pointer; }
-.leaveBtn:hover { background:#fff5f5; }
-
-/* ==== Строка сообщения с аватаром ==== */
-.row { display:flex; gap:8px; align-items:flex-end; margin:4px 6px; }
-.rowMine { justify-content:flex-end; }
-.rowTheir { justify-content:flex-start; }
-.bubbleAvatarWrap { width:28px; display:flex; }
-.bubbleAvatar { width:28px; height:28px; border-radius:50%; object-fit:cover; }
-
-/* ==== Пузырь ==== */
-.bubble { position:relative; max-width:70%; padding:10px 12px; border-radius:14px; border:1px solid #e7ebf1; background:#fff; }
-.mine { margin-left:auto; background:#4473ff; color:#fff; border-color:#4473ff; }
-.their {}
-
-.senderName { font-size:12px; color:#6b7280; margin-bottom:2px; }
-.text { white-space:pre-wrap; word-break:break-word; }
-
-.timeRow { display:flex; align-items:center; gap:6px; margin-top:4px; justify-content:flex-end; }
-.time { font-size:10px; opacity:.7; }
-.edited { color:#9ca3af; font-size:12px; }
-.ticks { font-size:12px; color:#9ca3af; }
-
-/* ==== Вложения ==== */
-.attachments { display:flex; flex-direction:column; gap:8px; margin-top:6px; }
-
-/* ==== Кнопка "ещё" и меню сообщения ==== */
-.moreBtn {
-    position:absolute; top:6px; right:6px;
-    border:none; background:transparent; cursor:pointer; opacity:.6;
-}
-.moreBtn:hover { opacity:1; }
-
-.msgMenu {
-    position:absolute; right:6px; top:28px;
-    background:#fff; border:1px solid #e5e7eb; border-radius:8px;
-    box-shadow:0 6px 20px rgba(0,0,0,.12);
-    display:flex; flex-direction:column; z-index:5;
-}
-.msgMenuItem { background:transparent; border:none; padding:8px 12px; text-align:left; cursor:pointer; }
-.msgMenuItem:hover { background:#f3f4f6; }
-
-.deleted { color:#9ca3af; font-style:italic; }
-
-/* ==== Реакции под сообщением ==== */
-.reactionsRow { display:flex; gap:6px; margin-top:6px; align-items:center; flex-wrap:wrap; }
-.reaction {
-    border:1px solid #e5e7eb; background:#fff;
-    border-radius:16px; padding:2px 8px; font-size:13px; cursor:pointer;
-}
-.reactionMine { border-color:#60a5fa; background:#eff6ff; }
-
-/* ==== Контекстное меню (эмодзи + действия) ==== */
-.ctxMenu {
-    position:fixed; transform:translate(-50%, -100%);
-    z-index:9999; background:#fff; border:1px solid #e5e7eb;
-    box-shadow:0 10px 24px rgba(0,0,0,.12);
-    border-radius:12px; padding:8px;
-}
-.emojiGrid { display:grid; grid-template-columns:repeat(6, 28px); gap:6px; padding:4px; }
-.emojiBtn {
-    width:28px; height:28px; border-radius:6px;
-    border:1px solid transparent; background:#f8fafc; cursor:pointer;
-}
-.emojiBtn:hover { border-color:#e5e7eb; }
-.menuLine { height:1px; background:#eef2f7; margin:8px 0; }
-.menuActions { display:flex; gap:6px; justify-content:center; }
-.menuBtn {
-    font-size:12px; padding:6px 10px; border-radius:8px;
-    background:#f3f4f6; border:1px solid #e5e7eb; cursor:pointer;
-}
-.menuBtn:hover { background:#e5e7eb; }
-.danger { background:#fee2e2; border-color:#fecaca; color:#b91c1c; }
-.danger:hover { background:#fecaca; }
-
-/* ==== Эмодзи в композере ==== */
-.emojiComposerBtn {
-    margin-left:6px; border:none; background:transparent;
-    cursor:pointer; font-size:18px; line-height:1;
-}
-.emojiPickerComposer {
-    position:absolute; bottom:54px; left:52px; /* всплывает над композером слева от поля */
-    z-index:50; background:#fff; border:1px solid #e5e7eb;
-    box-shadow:0 10px 24px rgba(0,0,0,.12);
-    border-radius:12px; padding:8px;
+/* ---------- Layout ---------- */
+.root{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    min-height:0;
+    background:#f5f6f9;
 }
 
-/* ==== Редактирование ==== */
-.editWrap { display:grid; gap:6px; }
-.editInput { width:100%; border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; }
-.editActions { display:flex; gap:8px; }
+.header{
+    background:#fff;
+    border-bottom:1px solid #eceff3;
+    padding:12px 16px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    position:relative;
+}
+.typing{ font-weight:400; font-size:12px; color:#6b7280; margin-left:auto; }
 
-/* ==== Разделитель дней ==== */
-.dayDivider {
-    position:sticky; top:0; z-index:1;
-    display:inline-block; margin:8px auto 4px;
-    background:#e5e7eb; color:#374151; padding:2px 10px;
-    border-radius:12px; font-size:12px;
+/* ---------- Messages list ---------- */
+.list{
+    flex:1; min-height:0; overflow-y:auto;
+    padding:16px 16px 64px;
+    display:flex; flex-direction:column; gap:8px;
+    scroll-behavior:smooth;
+}
+/* scrollbar */
+.list::-webkit-scrollbar{ width:8px; }
+.list::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:4px; }
+.list::-webkit-scrollbar-thumb:hover{ background:#94a3b8; }
+.list::-webkit-scrollbar-track{ background:transparent; }
+
+/* ---------- Telegram-like row + bubbles ---------- */
+.msgRow{ display:flex; width:100%; }
+.rowMine{ justify-content:flex-end; }
+.rowTheir{ justify-content:flex-start; }
+
+.bubble{
+    position:relative;
+    max-width:68%;
+    padding:10px 76px 26px 12px;        /* справа место под время/галочки */
+    border-radius:16px;
+    border:1px solid transparent;
+    box-shadow:0 1px 0 rgba(0,0,0,.04);
+    color:#111827;
+    word-wrap:break-word;
+    line-height:1.25;
 }
 
-/* ряды с аватарками */
-.msgRow { display:flex; gap:8px; align-items:flex-end; }
-.rowMine { justify-content: flex-end; }
-.rowTheir { justify-content: flex-start; }
-.avatarSm { width:28px; height:28px; border-radius:50%; object-fit:cover; }
-.avatarPlaceholder { width:28px; height:28px; }
-
-/* имя автора в группе */
-.author { font-size:12px; font-weight:600; margin-bottom:4px; opacity:.8; }
-
-/* разделители по датам */
-.dayDivider {
-    align-self: center;
-    margin: 10px 0;
-    padding: 4px 10px;
-    font-size: 12px;
-    color: #6b7280;
-    background: #eaeef7;
-    border-radius: 12px;
+/* мои / их */
+.mine{
+    margin-left:auto;
+    background:#4473ff;              /* твой синий */
+    border-color:#4473ff;
+    color:#fff;
 }
+.their{
+    background:#fff;
+    border-color:#e7ebf1;
+    color:#111827;
+}
+
+/* “хвостики” как в ТГ — разное скругление нижних углов */
+.tailRight{ border-bottom-right-radius:4px;  border-bottom-left-radius:16px; }
+.tailLeft { border-bottom-left-radius:4px;   border-bottom-right-radius:16px; }
+
+/* основной текст */
+.text{ white-space:pre-wrap; font-size:14px; word-break: break-word;}
+
+/* старую подпись под сообщением скрываем — теперь мета в правом углу */
+.time{ display:none; }
+.edited{ color:#9ca3af; font-size:12px; }
+
+.attachments{ display:flex; flex-direction:column; gap:8px; margin-top:6px; }
+.deleted{ color:#9ca3af; font-style:italic; }
+
+/* ---------- Meta (время + галочки) как в ТГ ---------- */
+.metaRight{
+    position:absolute;
+    right:10px;
+    bottom:8px;
+    font-size:12px;
+    line-height:1;
+    opacity:.75;
+    pointer-events:none;
+}
+.mine .metaRight{ opacity:.9; color:#fff; text-shadow:0 1px 0 rgba(0,0,0,.15); }
+.their .metaRight{ opacity:.65; color:#404a5a; }
 
 /* галочки */
-.tick { margin-left: 6px; font-size: 11px; opacity: .8; }
-.tickRead { opacity: 1; color: #60a5fa; }
-
-/* участники в шапке */
-.participants { margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-.memberChip {
-    display:inline-flex; align-items:center; gap:6px;
-    padding:4px 8px; border-radius:999px; border:1px solid #e5e7eb; background:#fff; cursor:pointer;
+.ticks{
+    margin-left:4px;
+    font-weight:700;
+    font-size:12px;
+    user-select:none;
 }
-.memberChip:hover { background:#f3f4f6; }
-.leaveBtn { margin-left:6px; padding:6px 10px; border-radius:8px; border:1px solid #fecaca; background:#fee2e2; cursor:pointer; }
-.leaveBtn:hover { background:#fecaca; }
+.mine .ticks{ color:#fff; text-shadow:0 1px 0 rgba(0,0,0,.15); } /* на синем */
+.their .ticks{ color:#6b7280; }                                   /* на белом */
+.single{ color:#9aa3b2; }         /*  ✓  доставлено (серый) */
+.double{ color:#22c55e; }         /* ✓✓ прочитано (зелёный) */
 
-.dateDivider {
-    align-self: center;
-    background: #eef2f7;
-    color: #6b7280;
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 10px;
-    margin: 8px 0;
+/* ---------- Reactions ---------- */
+.reactionsRow{ display:flex; gap:4px; margin-top:6px; margin-bottom: 2px; align-items:center; flex-wrap:wrap; }
+.reaction{
+    border:1px solid #e5e7eb; background:#fff;
+    border-radius:999px; height:22px; padding:0 6px;
+    font-size:13px; cursor:pointer; display:inline-flex; align-items:center;
+}
+.reactionMine{ border-color:#60a5fa; background:#eff6ff; }
+
+/* ---------- Composer ---------- */
+.composer{
+    display:flex; gap:8px; padding:10px;
+    border-top:1px solid #eceff3; background:#fff; position:relative;
+}
+.input{
+    flex:1; border:1px solid #d6dbe1; border-radius:12px; padding:10px 12px; outline:none;
+}
+.input:focus{ border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
+.send{ background:#4473ff; color:#fff; border:none; border-radius:12px; padding:10px 14px; cursor:pointer; }
+.attach{
+    display:inline-flex; align-items:center; justify-content:center; width:40px;
+    border:1px dashed #c9d1e0; border-radius:10px; cursor:pointer; user-select:none;
+}
+.attach:hover{ background:#f3f5fb; }
+.emojiComposerBtn{ margin-left:6px; border:none; background:transparent; cursor:pointer; font-size:18px; }
+.emojiPickerComposer{
+    position:absolute; bottom:54px; left:48px; z-index:50; background:#fff;
+    border:1px solid #e5e7eb; box-shadow:0 10px 24px rgba(0,0,0,.12);
+    border-radius:12px; padding:8px; display:flex; gap:6px;
+}
+.emojiBtn{
+    width:28px; height:28px; border-radius:6px; border:1px solid transparent;
+    background:#f8fafc; cursor:pointer; font-size:18px; line-height:1; padding:4px 6px;
+}
+.emojiBtn:hover{ border-color:#e5e7eb; }
+
+/* ---------- Context menu ---------- */
+.ctxMenu{
+    position:fixed; z-index:9999; background:#fff; border:1px solid #e5e7eb;
+    box-shadow:0 10px 24px rgba(0,0,0,.12); border-radius:12px; padding:8px;
+}
+.emojiGrid{ display:grid; grid-template-columns:repeat(5,28px); gap:6px; padding:4px; }
+.menuLine{ height:1px; background:#eef2f7; margin:6px 0; }
+.menuActions{ display:flex; gap:6px; }
+.menuBtn{ font-size:12px; padding:6px 10px; border-radius:8px; background:#f3f4f6; border:1px solid #e5e7eb; cursor:pointer; }
+.menuBtn:hover{ background:#e5e7eb; }
+.danger{ background:#fee2e2 !important; border-color:#fecaca !important; }
+.danger:hover{ background:#fecaca !important; }
+
+/* ---------- Date divider ---------- */
+.dateDivider{
+    margin:10px 0; display:flex; justify-content:center; position:relative;
+}
+.dateDivider::before,.dateDivider::after{
+    content:""; flex:1; border-bottom:1px solid #e5e7eb; margin:auto 8px;
+}
+.dateDivider>span{
+    background:#e9eef6; color:#344054; border:1px solid #dde5ee;
+    border-radius:999px; padding:2px 10px; font-size:12px;
 }
 
-.membersBar { display:flex; gap:8px; align-items:center; padding:6px 12px; }
-.memberDot { width:28px; height:28px; border-radius:50%; overflow:hidden; border:1px solid #e5e7eb; background:#fff; cursor:pointer; display:grid; place-items:center; }
-.memberDot img { width:100%; height:100%; object-fit:cover; }
-.leaveBtn { margin-left:auto; padding:6px 10px; border-radius:8px; border:1px solid #fecaca; background:#fee2e2; cursor:pointer; }
-.ticks { margin-left:6px; font-size:12px; color:#9ca3af; user-select:none; }
-.seenSome { color:#60a5fa; }  /* синие двойные — кто-то уже видел */
-.seenAll  { color:#3b82f6; }
-
-.headerActions { margin-left: auto; position: relative; display: flex; align-items: center; }
-.kebabBtn {
-    border: none; background: transparent; cursor: pointer; font-size: 22px;
-    width: 32px; height: 32px; line-height: 1; border-radius: 8px;
+/* ---------- Header actions (⋯ dropdown) ---------- */
+.headerActions{ margin-left:8px; position:relative; }
+.kebabBtn{
+    border:none; background:transparent; cursor:pointer; font-size:20px; line-height:1;
+    padding:4px 8px; border-radius:8px;
 }
-.kebabBtn:hover { background: #f3f4f6; }
+.kebabBtn:hover{ background:#f3f4f6; }
+.dropdown{
+    position:absolute; right:0; top:calc(100% + 8px); z-index:40;
+    min-width:240px; background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+    box-shadow:0 12px 32px rgba(0,0,0,.14); padding:8px;
+}
+.menuSectionTitle{ font-size:11px; color:#6b7280; padding:4px 6px 6px; text-transform:uppercase; }
+.usersList{ display:flex; flex-direction:column; gap:4px; max-height:260px; overflow:auto; }
+.userItem{
+    display:flex; align-items:center; gap:8px; width:100%;
+    padding:6px 8px; border:none; background:transparent; cursor:pointer; border-radius:8px;
+}
+.userItem:hover{ background:#f9fafb; }
+.userAvatar,.userAvatarFallback{
+    width:28px; height:28px; border-radius:999px; border:1px solid #e5e7eb; overflow:hidden;
+    display:grid; place-items:center; background:#fff;
+}
+.userAvatar{ object-fit:cover; }
+.userName{ font-size:14px; color:#111827; }
+.menuItem{
+    width:100%; text-align:left; padding:8px 10px; border:none; background:#f3f4f6;
+    border-radius:8px; cursor:pointer;
+}
+.menuItem:hover{ background:#e5e7eb; }
 
-.dropdown {
-    position: absolute; right: 0; top: 40px; min-width: 260px; max-width: 320px;
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-    box-shadow: 0 10px 24px rgba(0,0,0,.12); padding: 8px; z-index: 50;
+/* ---------- Members ribbon ---------- */
+.membersBar{
+    display:flex; gap:8px; padding:6px 12px; align-items:center; background:#f8fafc; border-bottom:1px solid #eef2f7;
+}
+.memberDot{
+    width:28px; height:28px; border-radius:50%; border:1px solid #e5e7eb; background:#fff;
+    overflow:hidden; cursor:pointer; display:grid; place-items:center;
+}
+.memberDot img{ width:100%; height:100%; object-fit:cover; }
+.memberDot span{ font-size:12px; color:#111827; }
+.leaveBtn{
+    margin-left:auto; padding:6px 10px; border-radius:8px;
+    border:1px solid #fecaca; background:#fee2e2; cursor:pointer;
+}
+.leaveBtn:hover{ background:#fecaca; }
+.composerAvatar{
+    width:32px; height:32px; border-radius:50%;
+    object-fit:cover; border:1px solid #e5e7eb;
 }
 
-.menuSectionTitle { font-size: 12px; color: #6b7280; padding: 4px 6px; }
-.usersList { max-height: 280px; overflow: auto; display: grid; gap: 4px; padding: 4px; }
-
-.userItem {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: transparent; border: 1px solid transparent; border-radius: 10px;
-    padding: 6px; cursor: pointer;
+.ctxMenu{
+    position: fixed;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 10px 24px rgba(0,0,0,.12);
+    border-radius: 12px;
+    padding: 8px;
+    max-width: min(320px, calc(100vw - 16px)); /* не шире экрана */
+    max-height: min(60vh, calc(100vh - 16px)); /* не выше экрана */
+    overflow: auto; /* если много эмодзи — появится прокрутка */
 }
-.userItem:hover { background: #f8fafc; border-color: #e5e7eb; }
-.userAvatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
-.userAvatarFallback {
-    width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
-    background: #eef2ff; color: #374151; font-size: 12px;
-}
-.userName { font-size: 14px; color: #111827; }
-
-.menuItem {
-    width: 100%; text-align: left; padding: 8px 10px; border-radius: 10px;
-    background: #f3f4f6; border: 1px solid #e5e7eb; cursor: pointer;
-}
-.menuItem:hover { background: #e5e7eb; }
-.menuLine { height: 1px; background: #eef2f7; margin: 8px 0; }
-.danger { background: #fee2e2; border-color: #fecaca; }
-.danger:hover { background: #fecaca; }
-

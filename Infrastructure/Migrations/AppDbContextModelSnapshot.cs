@@ -239,7 +239,8 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Email")
-                        .HasColumnType("text");
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<bool>("IsOnline")
                         .HasColumnType("boolean");
@@ -247,15 +248,24 @@ namespace Infrastructure.Migrations
                     b.Property<DateTime?>("LastSeenUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<string>("Name")
                         .HasColumnType("text");
 
                     b.Property<string>("Password")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.HasIndex("Login")
                         .IsUnique();
 
                     b.ToTable("Users");

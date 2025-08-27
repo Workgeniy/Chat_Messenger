@@ -18,12 +18,11 @@ namespace Core.Entities
         public long SizeBytes { get; set; }
         public string StoragePath { get; set; } = ""; // где лежит исходник
 
-        // Для превью
         public int? Width { get; set; }
         public int? Height { get; set; }
 
         public ICollection<AttachmentVariant> Variants { get; set; } = new List<AttachmentVariant>();
         public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
-        public string Status { get; set; } = "ready"; // "ready" | "processing" | "failed"
+        public string Status { get; set; } = "ready"; 
     }
 }

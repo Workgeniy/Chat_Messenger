@@ -3,3 +3,7 @@
     grid-template-columns: 300px 1fr;
     height: 100vh;
 }
+html, body, #root {
+    height: 100%;
+    min-height: 0;
+}
