@@ -17,9 +17,10 @@ export type PresencePayload = { userId: number; isOnline: boolean; lastSeenUtc?:
 
 /** Фабрика хаба */
 export function createHub(getToken: () => string | null) {
+    const HUB_URL = import.meta.env.VITE_HUB_URL ?? "/chathub";
     const connection = new signalR.HubConnectionBuilder()
         // ВАЖНО: регистр! сервер мапит /chatHub
-        .withUrl("/chatHub", { accessTokenFactory: () => getToken() ?? "" })
+        .withUrl(HUB_URL, { accessTokenFactory: () => getToken() ?? "" })
         .withAutomaticReconnect()
         .build();
 
@@ -125,13 +126,12 @@ export function createHub(getToken: () => string | null) {
 
     return {
         connection,
-        // lifecycle
         start,
         stop,
 
         // groups
-        joinChat: (chatId:number)=>connection.invoke("JoinChat", chatId),
-        leaveChat: (chatId:number)=>connection.invoke("LeaveChat", chatId),
+        joinChat,
+        leaveChat,
 
         // typing
         typing,

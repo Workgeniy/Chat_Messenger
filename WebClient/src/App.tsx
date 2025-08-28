@@ -44,11 +44,11 @@ export default function App() {
     const [members, setMembers] = useState<Participant[]>([]);
 
     const [presence, setPresence] = useState<Map<number, {isOnline: boolean; lastSeenUtc?: string | null}>>(new Map());
-    const [typingChatIds, setTypingChatIds] = useState<Set<number>>(new Set());
+    const [, setTypingChatIds] = useState<Set<number>>(new Set());
 
     const [typingByChat, setTypingByChat] = useState<Map<number, Set<number>>>(new Map());
 
-    const [typing, setTyping] = useState<string[]>([]);
+    const [, setTyping] = useState<string[]>([]);
     const typingTimersRef = useRef<Map<string, any>>(new Map());
 
     const activeChat = chats.find((c) => c.id === active) ?? null;

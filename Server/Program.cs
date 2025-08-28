@@ -11,7 +11,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Db
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("ConnectionStrings__DefaultConnection")));
+
+var cs =
+    builder.Configuration.GetConnectionString("DefaultConnection") // из appsettings.*.json
+    ?? builder.Configuration["ConnectionStrings__DefaultConnection"] // из ENV для Docker
+    ?? throw new InvalidOperationException(
+        "Connection string 'ConnectionStrings:DefaultConnection' not found.");
+
+builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(cs));
 
 // Controllers & Swagger
 builder.Services.AddControllers();
@@ -72,101 +80,101 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-    await SeedDemoDataAsync(db);
-}
+//using (var scope = app.Services.CreateScope())
+//{
+//    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+//    await db.Database.MigrateAsync();
+//    //await SeedDemoDataAsync(db);
+//}
 
-static async Task SeedDemoDataAsync(AppDbContext db)
-{
-    // 1) пользователи (с логинами и хэш-паролями)
-    var pwdHash = BCrypt.Net.BCrypt.HashPassword("Passw0rd!");
+//static async Task SeedDemoDataAsync(AppDbContext db)
+//{
+//    // 1) пользователи (с логинами и хэш-паролями)
+//    var pwdHash = BCrypt.Net.BCrypt.HashPassword("Passw0rd!");
 
-    // ALICE
-    var alice = await db.Users.FirstOrDefaultAsync(u => u.Email == "alice@example.com");
-    if (alice == null)
-    {
-        alice = new User
-        {
-            Login = "alice",
-            Name = "Alice",
-            Email = "alice@example.com",
-            Password = pwdHash
-        };
-        db.Users.Add(alice);
-        await db.SaveChangesAsync();
-    }
-    else if (string.IsNullOrWhiteSpace(alice.Login))
-    {
-        alice.Login = "alice";
-        if (!alice.Password.StartsWith("$2")) // на случай старых данных без хэша
-            alice.Password = pwdHash;
-        await db.SaveChangesAsync();
-    }
+//    // ALICE
+//    var alice = await db.Users.FirstOrDefaultAsync(u => u.Email == "alice@example.com");
+//    if (alice == null)
+//    {
+//        alice = new User
+//        {
+//            Login = "alice",
+//            Name = "Alice",
+//            Email = "alice@example.com",
+//            Password = pwdHash
+//        };
+//        db.Users.Add(alice);
+//        await db.SaveChangesAsync();
+//    }
+//    else if (string.IsNullOrWhiteSpace(alice.Login))
+//    {
+//        alice.Login = "alice";
+//        if (!alice.Password.StartsWith("$2")) // на случай старых данных без хэша
+//            alice.Password = pwdHash;
+//        await db.SaveChangesAsync();
+//    }
 
-    // BOB
-    var bob = await db.Users.FirstOrDefaultAsync(u => u.Email == "bob@example.com");
-    if (bob == null)
-    {
-        bob = new User
-        {
-            Login = "bob",
-            Name = "Bob",
-            Email = "bob@example.com",
-            Password = pwdHash
-        };
-        db.Users.Add(bob);
-        await db.SaveChangesAsync();
-    }
-    else if (string.IsNullOrWhiteSpace(bob.Login))
-    {
-        bob.Login = "bob";
-        if (!bob.Password.StartsWith("$2"))
-            bob.Password = pwdHash;
-        await db.SaveChangesAsync();
-    }
+//    // BOB
+//    var bob = await db.Users.FirstOrDefaultAsync(u => u.Email == "bob@example.com");
+//    if (bob == null)
+//    {
+//        bob = new User
+//        {
+//            Login = "bob",
+//            Name = "Bob",
+//            Email = "bob@example.com",
+//            Password = pwdHash
+//        };
+//        db.Users.Add(bob);
+//        await db.SaveChangesAsync();
+//    }
+//    else if (string.IsNullOrWhiteSpace(bob.Login))
+//    {
+//        bob.Login = "bob";
+//        if (!bob.Password.StartsWith("$2"))
+//            bob.Password = pwdHash;
+//        await db.SaveChangesAsync();
+//    }
 
 
-    // 2) чат между ними (ищем диалог с этими двумя участниками)
-    var chat = await db.Chats
-        .Include(c => c.ChatUsers)
-        .FirstOrDefaultAsync(c =>
-            c.ChatUsers.Count == 2 &&
-            c.ChatUsers.Any(x => x.UserId == alice.Id) &&
-            c.ChatUsers.Any(x => x.UserId == bob.Id));
+//    // 2) чат между ними (ищем диалог с этими двумя участниками)
+//    var chat = await db.Chats
+//        .Include(c => c.ChatUsers)
+//        .FirstOrDefaultAsync(c =>
+//            c.ChatUsers.Count == 2 &&
+//            c.ChatUsers.Any(x => x.UserId == alice.Id) &&
+//            c.ChatUsers.Any(x => x.UserId == bob.Id));
 
-    if (chat == null)
-    {
-        chat = new Chat
-        {
-            // если у тебя поле называется Name — оставь Name; если Title — заполни Title
-            Name = "Диалог",  // или Title = "Диалог"
-            Created = DateTime.UtcNow, // если есть такое поле
-            IsGroup = false            // если есть такое поле
-        };
-        db.Chats.Add(chat);
-        await db.SaveChangesAsync();
+//    if (chat == null)
+//    {
+//        chat = new Chat
+//        {
+//            // если у тебя поле называется Name — оставь Name; если Title — заполни Title
+//            Name = "Диалог",  // или Title = "Диалог"
+//            Created = DateTime.UtcNow, // если есть такое поле
+//            IsGroup = false            // если есть такое поле
+//        };
+//        db.Chats.Add(chat);
+//        await db.SaveChangesAsync();
 
-        db.ChatUsers.AddRange(
-            new ChatUser { ChatId = chat.Id, UserId = alice.Id, IsAdmin = true, Created = DateTime.UtcNow },
-            new ChatUser { ChatId = chat.Id, UserId = bob.Id, IsAdmin = false, Created = DateTime.UtcNow }
-        );
-        await db.SaveChangesAsync();
-    }
+//        db.ChatUsers.AddRange(
+//            new ChatUser { ChatId = chat.Id, UserId = alice.Id, IsAdmin = true, Created = DateTime.UtcNow },
+//            new ChatUser { ChatId = chat.Id, UserId = bob.Id, IsAdmin = false, Created = DateTime.UtcNow }
+//        );
+//        await db.SaveChangesAsync();
+//    }
 
-    // 3) первые сообщения
-    var hasMsgs = await db.Messages.AnyAsync(m => m.ChatId == chat.Id);
-    if (!hasMsgs)
-    {
-        db.Messages.AddRange(
-            new Message { ChatId = chat.Id, SenderId = alice.Id, Content = "Привет, это тест!", Sent = DateTime.UtcNow.AddMinutes(-2) },
-            new Message { ChatId = chat.Id, SenderId = bob.Id, Content = "Хай! Видно отлично 👋", Sent = DateTime.UtcNow.AddMinutes(-1) }
-        );
-        await db.SaveChangesAsync();
-    }
-}
+//    // 3) первые сообщения
+//    var hasMsgs = await db.Messages.AnyAsync(m => m.ChatId == chat.Id);
+//    if (!hasMsgs)
+//    {
+//        db.Messages.AddRange(
+//            new Message { ChatId = chat.Id, SenderId = alice.Id, Content = "Привет, это тест!", Sent = DateTime.UtcNow.AddMinutes(-2) },
+//            new Message { ChatId = chat.Id, SenderId = bob.Id, Content = "Хай! Видно отлично 👋", Sent = DateTime.UtcNow.AddMinutes(-1) }
+//        );
+//        await db.SaveChangesAsync();
+//    }
+//}
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -183,5 +191,11 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<ChatHub>("/chatHub");
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
 
 app.Run();
