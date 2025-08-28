@@ -1,0 +1,50 @@
+.backdrop{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.32);
+    display:flex; align-items:center; justify-content:center;
+    z-index:2000; /* поверх всего */
+}
+
+.card{
+    width:min(680px, 92vw);
+    max-height:80vh; overflow:auto;
+    background:#fff; border:1px solid #e5e7eb; border-radius:16px;
+    box-shadow:0 20px 48px rgba(0,0,0,.18);
+    padding:16px;
+}
+
+.input{
+    width:100%; padding:10px 12px;
+    border:1px solid #e5e7eb; border-radius:10px;
+    margin-bottom:10px; outline:none;
+}
+.input:focus{ border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
+
+.list{ max-height:60vh; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+
+.row{
+    display:flex; align-items:center; gap:12px;
+    padding:8px; border:1px solid #f0f2f5; border-radius:10px; background:#fff;
+}
+.row:hover{ background:#f9fafb; }
+
+.avatar{ width:36px; height:36px; border-radius:50%; object-fit:cover; border:1px solid #e5e7eb; }
+.meta{ flex:1; min-width:0; }
+.name{ font-weight:600; }
+.email{ font-size:12px; color:#6b7280; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.primary{
+    background:#2563eb; color:#fff; border:none; padding:8px 12px;
+    border-radius:10px; cursor:pointer;
+}
+.primary:hover{ filter:brightness(1.05); }
+
+.footer{ display:flex; justify-content:flex-end; margin-top:10px; }
+.close{
+    background:#f3f4f6; border:1px solid #e5e7eb; padding:8px 12px;
+    border-radius:10px; cursor:pointer;
+}
+.close:hover{ background:#eef1f4; }
+
+.error{ color:#b91c1c; padding:8px 0; }
+.empty{ color:#6b7280; padding:8px 0; text-align:center; }

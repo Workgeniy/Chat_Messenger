@@ -1,0 +1,17 @@
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:grid;place-items:center;z-index:70}
+.card{width:min(680px,90vw);max-height:80vh;overflow:auto;background:#fff;border-radius:12px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.2)}
+.title{font-size:18px;font-weight:600;margin-bottom:8px}
+.field{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.input{border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px}
+.sep{height:1px;background:#eee;margin:10px 0}
+.list{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.row{display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px}
+.row:hover{background:#f9fafb}
+.avatar{width:32px;height:32px;border-radius:50%;object-fit:cover}
+.meta{display:flex;flex-direction:column}
+.name{font-weight:600}
+.email{font-size:12px;color:#6b7280}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.primary{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 12px;cursor:pointer}
+.primary:disabled{opacity:.6;cursor:not-allowed}
+.secondary{background:#f3f4f6;border:none;border-radius:8px;padding:8px 12px;cursor:pointer}
