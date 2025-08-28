@@ -81,7 +81,6 @@ using (var scope = app.Services.CreateScope())
 
 static async Task SeedDemoDataAsync(AppDbContext db)
 {
-    // 1) пользователи
     // 1) пользователи (с логинами и хэш-паролями)
     var pwdHash = BCrypt.Net.BCrypt.HashPassword("Passw0rd!");
 

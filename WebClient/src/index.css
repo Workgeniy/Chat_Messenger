@@ -71,4 +71,15 @@ button:focus-visible {
   button {
     background-color: #f9f9f9;
   }
+
+    @media (max-width: 920px) {
+        .appGrid {
+            display: grid;
+            grid-template-columns: 1fr;
+            height: 100svh;
+            width: 100%;
+        }
+        .sidebar { display: none; }
+        .sidebar.open { display: block; position: fixed; inset: 0; z-index: 50; background:#fff; }
+    }
 }

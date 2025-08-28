@@ -1,10 +1,14 @@
 ﻿using Core.DTO;
+using Core.Entities;
 using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Server.Hubs;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 using System.Security.Claims;
 
 namespace Server.Controllers;
@@ -38,11 +42,8 @@ public class UsersController : ControllerBase
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
         if (u == null) return NotFound();
 
-        if (!string.IsNullOrWhiteSpace(dto.Name)) u.Name = dto.Name;
+        if (!string.IsNullOrWhiteSpace(dto.Name)) u.Name = dto.Name.Trim();
         if (!string.IsNullOrWhiteSpace(dto.Email)) u.Email = dto.Email.Trim();
-
-        if (!string.IsNullOrWhiteSpace(dto.Password))
-            u.Password = BCrypt.Net.BCrypt.HashPassword(dto.Password);
 
         await _db.SaveChangesAsync();
         return Ok(new { ok = true });
@@ -55,27 +56,29 @@ public class UsersController : ControllerBase
     {
         if (file == null || file.Length == 0) return BadRequest("Файл не передан");
 
-        var me = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == me);
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
         if (user == null) return NotFound();
 
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
-        if (!allowed.Contains(ext)) return BadRequest("Разрешены jpg/jpeg/png/webp");
+        // базовые лимиты/валидация
+        const long MaxAvatarSize = 10 * 1024 * 1024; // 10 MB
+        if (file.Length > MaxAvatarSize) return BadRequest("Файл слишком большой");
+
+        // «прожарка» через ImageSharp (срежет EXIF, приведёт к JPEG)
+        using var image = await Image.LoadAsync(file.OpenReadStream()); // упадёт, если это не картинка
+        image.Mutate(x => x.Resize(new ResizeOptions { Mode = ResizeMode.Max, Size = new Size(512, 512) }));
 
         Directory.CreateDirectory(Path.Combine(_env.WebRootPath, "avatars"));
-        var fileName = $"{Guid.NewGuid():N}{ext}";
+        var fileName = $"{Guid.NewGuid():N}.jpg";
         var path = Path.Combine(_env.WebRootPath, "avatars", fileName);
+        await image.SaveAsJpegAsync(path, new JpegEncoder { Quality = 85 });
 
-        using (var fs = System.IO.File.Create(path))
-            await file.CopyToAsync(fs);
-
-        // сохраним относительный url
         user.AvatarUrl = $"/avatars/{fileName}";
         await _db.SaveChangesAsync();
 
         return Ok(new { avatarUrl = user.AvatarUrl });
     }
+
 
 
     [Authorize]

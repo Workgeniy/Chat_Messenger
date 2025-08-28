@@ -31,63 +31,52 @@ public class ChatsController : ControllerBase
         var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
         var items = await _db.Chats
-            .AsNoTracking()
-            .Where(c => c.ChatUsers.Any(u => u.UserId == me))
-            .Select(c => new
-            {
-                c.Id,
-                c.IsGroup,
-                Title = c.IsGroup
-                    ? c.Name
-                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.Name).FirstOrDefault(),
-                AvatarUrl = c.IsGroup
-                    ? c.AvatarUrl
-                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.AvatarUrl).FirstOrDefault(),
+         .AsNoTracking()
+         .Where(c => c.ChatUsers.Any(u => u.UserId == me))
+         .Select(c => new {
+             c.Id,
+             c.IsGroup,
+             Title = c.IsGroup ? c.Name
+                               : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.Name).FirstOrDefault(),
+             AvatarUrl = c.IsGroup ? c.AvatarUrl
+                                   : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.AvatarUrl).FirstOrDefault(),
+             OpponentId = c.IsGroup ? (int?)null
+                                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.UserId).FirstOrDefault(),
+             IsOnline = c.IsGroup ? (bool?)null
+                                  : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.IsOnline).FirstOrDefault(),
+             LastSeenUtc = c.IsGroup ? (DateTime?)null
+                                     : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.LastSeenUtc).FirstOrDefault(),
+             LastMessage = c.Messages
+                 .OrderByDescending(m => m.Sent)
+                 .Select(m => new { m.Id, m.Sent, m.SenderId, m.Content })
+                 .FirstOrDefault(),
 
-                OpponentId = c.IsGroup ? (int?)null
-                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.UserId).FirstOrDefault(),
+             MyLastSeenId = c.ChatUsers.Where(x => x.UserId == me)
+                                       .Select(x => (int?)x.LastSeenMessageId).FirstOrDefault() ?? 0,
+             UnreadCount = c.Messages.Count(m =>
+                 m.Id > (c.ChatUsers.Where(x => x.UserId == me).Select(x => (int?)x.LastSeenMessageId).FirstOrDefault() ?? 0)
+                 && m.SenderId != me)
+         })
+         .ToListAsync();
 
-                IsOnline = c.IsGroup ? (bool?)null
-                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.IsOnline).FirstOrDefault(),
-                LastSeenUtc = c.IsGroup ? (DateTime?)null
-                    : c.ChatUsers.Where(x => x.UserId != me).Select(x => x.User!.LastSeenUtc).FirstOrDefault(),
-
-                LastMessage = c.Messages
-                    .OrderByDescending(m => m.Sent)
-                    .Select(m => new { m.Id, m.Sent, m.SenderId, m.Content })
-                    .FirstOrDefault(),
-
-                // мой lastSeenId (0 если null)
-                MyLastSeenId = c.ChatUsers.Where(x => x.UserId == me)
-                                          .Select(x => (int?)x.LastSeenMessageId)
-                                          .FirstOrDefault() ?? 0,
-
-                // Непрочитанные = сообщения после моего lastSeen и не мои
-                UnreadCount = c.Messages.Count(m => m.Id >
-                                 (c.ChatUsers.Where(x => x.UserId == me)
-                                             .Select(x => (int?)x.LastSeenMessageId)
-                                             .FirstOrDefault() ?? 0)
-                               && m.SenderId != me)
-            })
-            .OrderByDescending(x => x.LastMessage!.Sent)
-            .ToListAsync();
-
-        var result = items.Select(x => new
-        {
-            id = x.Id,
-            title = x.Title ?? "Диалог",
-            isGroup = x.IsGroup,
-            avatarUrl = x.AvatarUrl,
-            lastText = x.LastMessage?.Content,
-            lastUtc = x.LastMessage?.Sent,
-            lastSenderId = x.LastMessage?.SenderId,
-            opponentId = x.OpponentId,
-            isOnline = x.IsOnline,
-            lastSeenUtc = x.LastSeenUtc,
-            unreadCount = x.UnreadCount
-        });
+        var result = items
+            .OrderByDescending(x => x.LastMessage?.Sent ?? DateTime.MinValue) // ← безопасно
+            .Select(x => new {
+                id = x.Id,
+                title = x.Title ?? "Диалог",
+                isGroup = x.IsGroup,
+                avatarUrl = x.AvatarUrl,
+                lastText = x.LastMessage?.Content,
+                lastUtc = x.LastMessage?.Sent,
+                lastSenderId = x.LastMessage?.SenderId,
+                opponentId = x.OpponentId,
+                isOnline = x.IsOnline,
+                lastSeenUtc = x.LastSeenUtc,
+                unreadCount = x.UnreadCount
+            });
 
         return Ok(result);
+
     }
 
 

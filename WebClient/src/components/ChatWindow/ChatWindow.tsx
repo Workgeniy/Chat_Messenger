@@ -9,6 +9,7 @@ import styles from "./ChatWindow.module.css";
 import { Attachment } from "./Attachment";
 import { AttachedChip } from "./AttachedChip";
 
+
 /** ----- Types ----- */
 export type Reaction = { emoji: string; count: number; mine?: boolean };
 
@@ -68,8 +69,7 @@ export default function ChatWindow(props: Props) {
     const {
         title, avatarUrl, userId, messages,
         onSend, onUpload, onTyping, typingUsers, onLoadOlder,
-        onEdit, onDelete, onReact, onUnreact,
-        isGroup, members, onDirectMessage, onLeaveChat, onSeen
+        onEdit, onDelete, onReact, onUnreact, members, onSeen
     } = props;
 
     const [text, setText] = useState("");
@@ -88,8 +88,18 @@ export default function ChatWindow(props: Props) {
 
     const shouldStickRef = useRef(true);
 
-    const [headMenuOpen, setHeadMenuOpen] = useState(false);
-    const headMenuRef = useRef<HTMLDivElement>(null);
+    const longPressTimersRef = useRef<Map<number, number>>(new Map());
+
+    const lastSeenSentRef = useRef<number | null>(null);
+    useEffect(() => {
+        if (!onSeen || messages.length === 0) return;
+        const lastId = messages[messages.length - 1].id;
+        if (lastSeenSentRef.current !== lastId) {
+            onSeen(lastId);
+            lastSeenSentRef.current = lastId;
+        }
+    }, [messages.length, onSeen]);
+
 
     /** Группировка по датам */
     const itemsWithDateBreaks = useMemo(() => {
@@ -127,6 +137,14 @@ export default function ChatWindow(props: Props) {
             });
         }
     }
+    useEffect(() => {
+        const el = listRef.current;
+        if (!el) return;
+        const imgs = el.querySelectorAll('img');
+        const fn = () => { if (shouldStickRef.current) stickToBottom(); };
+        imgs.forEach(img => img.addEventListener('load', fn, { once: true }));
+        return () => imgs.forEach(img => img.removeEventListener('load', fn));
+    }, [messages.length]);
 
     /** Подгрузка истории */
     async function onScroll() {
@@ -141,7 +159,6 @@ export default function ChatWindow(props: Props) {
     }
 
     useEffect(() => {
-        const close = () => setMenuFor(null);
         const onResize = () => {
             // если меню открыто — переклампим позицию к центру окна
             if (menuFor !== null) {
@@ -196,12 +213,6 @@ export default function ChatWindow(props: Props) {
         setText("");
         setAttached([]);
     }
-
-    /** Отметка о прочтении */
-    useEffect(() => {
-        if (!onSeen || messages.length === 0) return;
-        onSeen(messages[messages.length - 1].id);
-    }, [messages.length]);
 
 
 // универсальный опенер контекст-меню, клампит позицию
@@ -259,6 +270,26 @@ export default function ChatWindow(props: Props) {
         };
     }, [menuFor]);
 
+    function startLongPress(id: number, el: HTMLElement, ms = 450) {
+        // откроем меню по центру пузыря
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2;
+        const y = r.top  + r.height / 2;
+
+        const t = window.setTimeout(() => {
+            openMenuAt({ clientX: x, clientY: y } as any, id);
+        }, ms);
+
+        longPressTimersRef.current.set(id, t);
+    }
+
+    function stopLongPress(id: number) {
+        const t = longPressTimersRef.current.get(id);
+        if (t) {
+            clearTimeout(t);
+            longPressTimersRef.current.delete(id);
+        }
+    }
 
     /** Рендер сообщения */
     function renderMessage(m: Msg) {
@@ -282,6 +313,9 @@ export default function ChatWindow(props: Props) {
                         e.stopPropagation();
                         openMenuAt(e.nativeEvent, m.id);
                     }}
+                    onTouchStart={(e) => startLongPress(m.id, e.currentTarget)}
+                    onTouchEnd={() => stopLongPress(m.id)}
+                    onTouchMove={() => stopLongPress(m.id)}
                 >
                     {m.isDeleted ? (
                         <div className={styles.deleted}>Сообщение удалено</div>

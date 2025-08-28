@@ -578,7 +578,7 @@ export default function App() {
                 typingByChat={typingByChat}
                 presence={presence}
             />
-            <div style={{ display: "flex", flexDirection: "column", minHeight: 0, width: "100%"  }}>
+            <div style={{ display:'flex', flexDirection:'column', minHeight:0, height:'100svh', width:'100%' }}>
 
                 <ChatWindow
                     title={activeChat?.title}

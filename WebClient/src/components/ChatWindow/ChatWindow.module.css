@@ -1,10 +1,9 @@
-/* ---------- Layout ---------- */
-.root{
-    display:flex;
-    flex-direction:column;
-    height:100%;
-    min-height:0;
-    background:#f5f6f9;
+.root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: #f5f6f9;
 }
 
 .header{
@@ -25,6 +24,10 @@
     padding:16px 16px 64px;
     display:flex; flex-direction:column; gap:8px;
     scroll-behavior:smooth;
+    background-image: url('/BackgroundChatWindow.png');
+    background-repeat: repeat;
+    background-size: 420px auto;
+    background-position: center;
 }
 /* scrollbar */
 .list::-webkit-scrollbar{ width:8px; }
@@ -114,6 +117,7 @@
 .composer{
     display:flex; gap:8px; padding:10px;
     border-top:1px solid #eceff3; background:#fff; position:relative;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
 .input{
     flex:1; border:1px solid #d6dbe1; border-radius:12px; padding:10px 12px; outline:none;
@@ -137,11 +141,6 @@
 }
 .emojiBtn:hover{ border-color:#e5e7eb; }
 
-/* ---------- Context menu ---------- */
-.ctxMenu{
-    position:fixed; z-index:9999; background:#fff; border:1px solid #e5e7eb;
-    box-shadow:0 10px 24px rgba(0,0,0,.12); border-radius:12px; padding:8px;
-}
 .emojiGrid{ display:grid; grid-template-columns:repeat(5,28px); gap:6px; padding:4px; }
 .menuLine{ height:1px; background:#eef2f7; margin:6px 0; }
 .menuActions{ display:flex; gap:6px; }
@@ -224,4 +223,12 @@
     max-width: min(320px, calc(100vw - 16px)); /* не шире экрана */
     max-height: min(60vh, calc(100vh - 16px)); /* не выше экрана */
     overflow: auto; /* если много эмодзи — появится прокрутка */
+}
+
+@media (max-width: 920px){
+    .bubble{ max-width: 84%; }
+    .emojiBtn, .reaction{ height: 32px; font-size: 16px; }
+    .input{ padding: 12px; }
+    .send{ padding: 12px 16px; }
+    .list{ background-size: 320px auto; } /* шаг узора поменьше */
 }

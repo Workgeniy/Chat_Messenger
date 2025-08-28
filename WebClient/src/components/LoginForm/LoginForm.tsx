@@ -31,44 +31,46 @@ export function LoginForm({ onLogin, onSwitchToRegister }: Props) {
     }
 
     return (
-        <div className={styles.centerWrap}>
-            <form className={styles.card} onSubmit={submit} autoComplete="on">
-                <div className={styles.header}>Вход</div>
+        <div className={styles.page}>
+            <div className={styles.centerWrap}>
+                <form className={styles.card} onSubmit={submit} autoComplete="on">
+                    <div className={styles.header}>Вход</div>
 
-                <label className={styles.label}>Логин</label>
-                <input
-                    className={styles.input}
-                    placeholder="Логин"
-                    value={login}
-                    onChange={(e) => setLogin(e.target.value)}
-                    autoComplete="username"
-                />
+                    <label className={styles.label}>Логин</label>
+                    <input
+                        className={styles.input}
+                        placeholder="Логин"
+                        value={login}
+                        onChange={(e) => setLogin(e.target.value)}
+                        autoComplete="username"
+                    />
 
-                <label className={styles.label}>Пароль</label>
-                <input
-                    className={styles.input}
-                    type="password"
-                    placeholder="Пароль"
-                    value={password}
-                    onChange={(e) => setPwd(e.target.value)}
-                    autoComplete="current-password"
-                />
+                    <label className={styles.label}>Пароль</label>
+                    <input
+                        className={styles.input}
+                        type="password"
+                        placeholder="Пароль"
+                        value={password}
+                        onChange={(e) => setPwd(e.target.value)}
+                        autoComplete="current-password"
+                    />
 
-                {err && <div className={styles.error}>{err}</div>}
+                    {err && <div className={styles.error}>{err}</div>}
 
-                <button className={styles.primary} disabled={loading}>
-                    {loading ? "Вход..." : "Войти"}
-                </button>
+                    <button className={styles.primary} disabled={loading}>
+                        {loading ? "Вход..." : "Войти"}
+                    </button>
 
-                {onSwitchToRegister && (
-                    <div className={styles.alt}>
-                        Нет аккаунта?{" "}
-                        <button type="button" className={styles.link} onClick={onSwitchToRegister}>
-                            Создать
-                        </button>
-                    </div>
-                )}
-            </form>
+                    {onSwitchToRegister && (
+                        <div className={styles.alt}>
+                            Нет аккаунта?{" "}
+                            <button type="button" className={styles.link} onClick={onSwitchToRegister}>
+                                Создать
+                            </button>
+                        </div>
+                    )}
+                </form>
+            </div>
         </div>
     );
 }
