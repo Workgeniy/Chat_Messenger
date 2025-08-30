@@ -19,5 +19,8 @@ namespace Core.Entities
         public bool IsOnline {  get; set; }
 
         public DateTime? LastSeenUtc { get; set; }
+
+        public string? EcdhPublicJwk { get; set; }
+        public string? SignPublicJwk { get; set; }
     }
 }

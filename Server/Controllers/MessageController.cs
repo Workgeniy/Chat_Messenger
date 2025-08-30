@@ -43,14 +43,14 @@ public class MessagesController : ControllerBase
            {
                id = m.Id,
                chatId = m.ChatId,
-               text = m.IsDeleted ? null : m.Content,  // ⚠️ не возвращаем «Сообщение удалено» как текст
-               isDeleted = m.IsDeleted,                // ⚠️ фронт покажет серую плашку
+               text = m.IsDeleted ? null : m.Content, 
+               isDeleted = m.IsDeleted,               
                senderId = m.SenderId,
                sentUtc = m.Sent,
                editedUtc = m.EditedUtc,
                attachments = m.Attachments.Select(a => new {
                    id = a.Id,
-                   url = $"/api/attachments/{a.Id}",   // ✅ стабильный URL через контроллер
+                   url = $"/api/attachments/{a.Id}",  
                    contentType = a.MimeType
                }),
                reactions = m.Reactions
@@ -82,7 +82,6 @@ public class MessagesController : ControllerBase
         _db.Messages.Add(msg);
         await _db.SaveChangesAsync();
 
-        // привязать загруженные вложения к сообщению
         if (dto.Attachments?.Any() == true)
         {
             var atts = await _db.Attachments
@@ -93,7 +92,6 @@ public class MessagesController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        // собрать payload ровно в том формате, который ждёт фронт
         var attachments = await _db.Attachments
             .Where(a => a.MessageId == msg.Id)
             .Select(a => new
@@ -101,7 +99,6 @@ public class MessagesController : ControllerBase
                 id = a.Id,
                 url = $"/api/attachments/{a.Id}",
                 contentType = a.MimeType,
-                // если делаешь варианты:
                 thumb = a.Variants.Where(v => v.Type == "thumb")
                                   .Select(v => $"/api/attachments/{a.Id}/thumb")
                                   .FirstOrDefault(),
@@ -160,7 +157,7 @@ public class MessagesController : ControllerBase
         if (m.SenderId != userId) return Forbid();
 
         m.IsDeleted = true;
-        m.Content = "";            // по желанию
+        m.Content = "";        
         m.EditedUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 

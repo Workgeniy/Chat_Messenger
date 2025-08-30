@@ -126,9 +126,9 @@ public class UsersController : ControllerBase
         return Ok(users);
     }
 
-    // POST /api/chats/{id}/seen { upToMessageId: number }
-    public record SeenDto(int upToMessageId);
 
+    public record SeenDto(int upToMessageId);
+    [Authorize]
     [HttpPost("{chatId:int}/seen")]
     public async Task<IActionResult> Seen(int chatId, [FromBody] SeenDto dto,
         [FromServices] IHubContext<ChatHub> hub)
@@ -193,6 +193,33 @@ public class UsersController : ControllerBase
         u.Password = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
         await _db.SaveChangesAsync();
         return Ok(new { ok = true });
+    }
+
+    [Authorize]
+    [HttpPost("me/keys")]
+    public async Task<IActionResult> UpsertKeys([FromBody] KeysDto dto)
+    {
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var u = await _db.Users.FindAsync(userId);
+        if (u == null) return NotFound();
+        u.EcdhPublicJwk = dto.EcdhPublicJwk.Trim();
+        u.SignPublicJwk = dto.SignPublicJwk.Trim();
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true });
+    }
+
+
+    [AllowAnonymous]
+    [HttpGet("{id:int}/keys")]
+    public async Task<IActionResult> GetKeys(int id)
+    {
+        var u = await _db.Users
+       .Where(x => x.Id == id)
+       .Select(x => new { ecdhPublicJwk = x.EcdhPublicJwk, signPublicJwk = x.SignPublicJwk })
+       .FirstOrDefaultAsync();
+
+        if (u == null || u.ecdhPublicJwk == null || u.signPublicJwk == null) return NotFound();
+        return Ok(u);
     }
 
 }

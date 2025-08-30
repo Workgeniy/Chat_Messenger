@@ -1,10 +1,8 @@
-// src/App.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
-
 import { LoginForm } from "./components/LoginForm/LoginForm";
 import { RegisterForm } from "./components/LoginForm/RegisterForm";
 import { ChatList } from "./components/ChatList/ChatList";
-import ChatWindow from "./components/ChatWindow/ChatWindow"; // default import
+import ChatWindow from "./components/ChatWindow/ChatWindow";
 import ProfilePanel from "./components/Profile/ProfilePanel";
 import AvatarMenu from "./components/Users/AvatarMenu";
 import SearchUsersModal from "./components/Users/SearchUsersModal";
@@ -13,11 +11,16 @@ import CreateChatModal from "./components/Chats/CreateChatModal";
 import {
     api,
     setToken,
-    uploadWithProgress,
+    postLoginInit,
+    editMessageE2EE,
+    maybeDecryptMessage,
+    uploadEncryptedWithProgress,
     type Chat,
     type Msg,
     type Participant,
+    authFetch
 } from "./lib/api";
+
 import { createHub } from "./lib/hub";
 import {
     saveAuthToStorage,
@@ -25,6 +28,7 @@ import {
     logoutThisTab,
     type StoredAccount,
 } from "./lib/authStore";
+import { forceRefreshRecipientKeys, reinstallMyKeys, setActiveE2EEUser } from "./lib/crypto";
 
 export default function App() {
     // ---------- AUTH ----------
@@ -43,8 +47,10 @@ export default function App() {
     const [showCreateChat, setShowCreateChat] = useState(false);
     const [members, setMembers] = useState<Participant[]>([]);
 
-    const [presence, setPresence] = useState<Map<number, {isOnline: boolean; lastSeenUtc?: string | null}>>(new Map());
+    const [presence, setPresence] = useState<Map<number, { isOnline: boolean; lastSeenUtc?: string | null }>>(new Map());
     const [, setTypingChatIds] = useState<Set<number>>(new Set());
+
+    const [keyAlert, setKeyAlert] = useState<{ userId: number, oldFp: string, newFp: string } | null>(null);
 
     const [typingByChat, setTypingByChat] = useState<Map<number, Set<number>>>(new Map());
 
@@ -53,8 +59,10 @@ export default function App() {
 
     const activeChat = chats.find((c) => c.id === active) ?? null;
 
-    // hub c ленивым токеном
+    // hub с ленивым токеном
     const hub = useMemo(() => createHub(() => auth?.token ?? null), [auth]);
+
+    const isEncrypted = (s?: string) => !!s && (s.startsWith("E2EE1:") || s.startsWith("E2EED1:"));
 
     // подгрузка участников для активного чата
     useEffect(() => {
@@ -87,7 +95,6 @@ export default function App() {
             unreadCount?: number | null;
         }) => {
             setChats(prev => {
-                // если уже есть — не дублируем
                 if (prev.some(c => c.id === p.id)) return prev;
                 const item: Chat = {
                     id: p.id,
@@ -102,7 +109,7 @@ export default function App() {
                     lastSenderId: p.lastSenderId ?? undefined,
                     unreadCount: p.unreadCount ?? 0
                 } as Chat;
-                return [item, ...prev]; // вставим наверх
+                return [item, ...prev];
             });
         };
 
@@ -110,6 +117,14 @@ export default function App() {
         return () => hub.connection.off("ChatCreated", onChatCreated);
     }, [hub]);
 
+    useEffect(() => {
+        const onKeyChange = (e: Event) => {
+            const d = (e as CustomEvent).detail as { userId: number; oldFp: string; newFp: string };
+            setKeyAlert(d);
+        };
+        window.addEventListener("e2ee:keychange", onKeyChange as any);
+        return () => window.removeEventListener("e2ee:keychange", onKeyChange as any);
+    }, []);
 
     // восстановить авторизацию
     useEffect(() => {
@@ -117,6 +132,9 @@ export default function App() {
         if (acc) {
             setToken(acc.token);
             setAuth(acc);
+            localStorage.setItem("userId", String(acc.userId));
+            setActiveE2EEUser(acc.userId);
+            void postLoginInit(acc.userId);
         }
     }, []);
 
@@ -125,9 +143,10 @@ export default function App() {
         if (!auth) return;
         setToken(auth.token);
         (async () => {
+            await postLoginInit(auth.userId);
             await hub.start();
             const list = await api.myChats();
-            setChats(list);
+            setChats(await decryptPreviews(list));
         })();
     }, [auth, hub]);
 
@@ -149,16 +168,6 @@ export default function App() {
                 next.set(p.userId, { isOnline: p.isOnline, lastSeenUtc: p.lastSeenUtc ?? null });
                 return next;
             });
-
-            // по возможности сразу подсветим в списке (для 1:1 чатов с opponentId)
-            // setChats(prev => prev.map(c => {
-            //     if (c.isGroup) return c;
-            //     // если сервер прислал opponentId — обновим онлайн в карточке
-            //     if (c.opponentId && c.opponentId === p.userId) {
-            //         return { ...c, isOnline: p.isOnline, lastSeenUtc: p.lastSeenUtc ?? c.lastSeenUtc };
-            //     }
-            //     return c;
-            // }));
         };
 
         hub.connection.on("PresenceChanged", handler);
@@ -167,13 +176,12 @@ export default function App() {
 
     useEffect(() => {
         if (!auth) return;
-        const onPresence = (p: { userId:number; isOnline:boolean; lastSeenUtc?:string|null }) => {
+        const onPresence = (p: { userId: number; isOnline: boolean; lastSeenUtc?: string | null }) => {
             setPresence(prev => {
                 const next = new Map(prev);
                 next.set(p.userId, { isOnline: p.isOnline, lastSeenUtc: p.lastSeenUtc ?? null });
                 return next;
             });
-            // если это 1:1 чат и у чата есть opponentId — сразу отразим в карточке
             setChats(prev => prev.map(c => {
                 if (c.isGroup) return c;
                 return (c.opponentId && c.opponentId === p.userId)
@@ -187,7 +195,7 @@ export default function App() {
 
     useEffect(() => {
         if (!auth) return;
-        const onSnapshot = (arr: Array<{userId:number; isOnline:boolean; lastSeenUtc?: string | null}>) => {
+        const onSnapshot = (arr: Array<{ userId: number; isOnline: boolean; lastSeenUtc?: string | null }>) => {
             setPresence(prev => {
                 const next = new Map(prev);
                 for (const p of arr) next.set(p.userId, { isOnline: !!p.isOnline, lastSeenUtc: p.lastSeenUtc ?? null });
@@ -199,12 +207,11 @@ export default function App() {
         return () => hub.connection.off("PresenceSnapshot", onSnapshot);
     }, [hub, auth]);
 
-
-// typing events (для списка)
+    // typing events (для списка)
     useEffect(() => {
         if (!auth) return;
-        const h = (p:{chatId:number; userId:number}) => {
-            if (p.userId === auth.userId) return; // не показываем свой тайпинг в списке
+        const h = (p: { chatId: number; userId: number }) => {
+            if (p.userId === auth.userId) return;
             setTypingByChat(prev => {
                 const next = new Map(prev);
                 const set = new Set(next.get(p.chatId) ?? []);
@@ -212,7 +219,6 @@ export default function App() {
                 next.set(p.chatId, set);
                 return next;
             });
-            // авто-очистка через 3s
             setTimeout(() => {
                 setTypingByChat(prev => {
                     const next = new Map(prev);
@@ -228,40 +234,38 @@ export default function App() {
         return () => hub.offTyping(h);
     }, [hub, auth]);
 
-
-    // входящие сообщения
+    // входящие сообщения (расшифровка + превью)
     useEffect(() => {
-        const handler = (m: Msg) => {
-            // если это активный чат — добавляем в ленту
+        const handler = async (m: Msg) => {
+            const prepared: Msg = (isEncrypted(m.text))
+                ? { ...m, text: (await maybeDecryptMessage(m.senderId, m.text)) ?? m.text }
+                : m;
+
             if (m.chatId === active) {
-                setMsgs(prev => [...prev, m]);
+                setMsgs(prev => (prev.some(x => x.id === prepared.id) ? prev : [...prev, prepared]));
             }
+
+            const preview = prepared.text || (m.attachments?.length ? "Вложение" : "");
 
             setChats(prev => {
                 const exists = prev.some(c => c.id === m.chatId);
                 if (!exists) {
-                    // ✅ чата в списке нет — подтянем превью с сервера
                     (async () => {
                         try {
                             const list = await api.myChats();
-                            setChats(list);
-                        } catch (e) {
-                            console.error("myChats reload failed", e);
-                        }
+                            setChats(await decryptPreviews(list));
+                        } catch (e) { console.error("myChats reload failed", e); }
                     })();
-                    return prev; // пока оставим как есть; после загрузки setChats(list) обновит состояние
+                    return prev;
                 }
-
-                // обновим last* и непрочитанные
                 return prev.map(c => {
                     if (c.id !== m.chatId) return c;
-                    const incUnread =
-                        // увеличиваем, если сообщение не в активном чате и отправитель не я
-                        m.chatId !== active && m.senderId !== auth?.userId ? (c.unreadCount ?? 0) + 1 : (c.unreadCount ?? 0);
-
+                    const incUnread = m.chatId !== active && m.senderId !== auth?.userId
+                        ? (c.unreadCount ?? 0) + 1
+                        : (c.unreadCount ?? 0);
                     return {
                         ...c,
-                        lastText: m.text || (m.attachments?.length ? "Вложение" : ""),
+                        lastText: preview,
                         lastUtc: m.sentUtc,
                         lastSenderId: m.senderId,
                         unreadCount: incUnread,
@@ -275,15 +279,14 @@ export default function App() {
     }, [active, hub, auth?.userId]);
 
     useEffect(() => {
-        const onCreated = (c: { id:number; title:string; avatarUrl?:string; isGroup:boolean }) => {
+        const onCreated = (c: { id: number; title: string; avatarUrl?: string; isGroup: boolean }) => {
             setChats(prev => (prev.some(x => x.id === c.id)
                 ? prev
-                : [{ id:c.id, title:c.title, avatarUrl:c.avatarUrl, isGroup:c.isGroup, unreadCount:0 }, ...prev]));
+                : [{ id: c.id, title: c.title, avatarUrl: c.avatarUrl, isGroup: c.isGroup, unreadCount: 0 }, ...prev]));
         };
         hub.connection.on("ChatCreated", onCreated);
         return () => hub.connection.off("ChatCreated", onCreated);
     }, [hub]);
-
 
     // индикатор «печатает…»
     useEffect(() => {
@@ -310,7 +313,6 @@ export default function App() {
         const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
         const handler = (p: { chatId: number }) => {
-            // 1) добавить chatId в сет
             setTypingChatIds(prev => {
                 if (prev.has(p.chatId)) return prev;
                 const next = new Set(prev);
@@ -318,7 +320,6 @@ export default function App() {
                 return next;
             });
 
-            // 2) сбросить таймер (3 сек «затухание»)
             const prevTimer = timers.get(p.chatId);
             if (prevTimer) clearTimeout(prevTimer);
             const t = setTimeout(() => {
@@ -341,28 +342,28 @@ export default function App() {
         };
     }, [hub]);
 
-
-    // правки/удаления с хаба
+    // правки/удаления (с расшифровкой)
     useEffect(() => {
-        const onEdited = (p: { id: number; chatId: number; text: string; editedUtc: string }) => {
-            setMsgs((prev) => prev.map((m) => (m.id === p.id ? { ...m, text: p.text, editedUtc: p.editedUtc } : m)));
-            setChats((prev) =>
-                prev.map((c) => (c.id === p.chatId ? { ...c, lastText: p.text, lastUtc: p.editedUtc } : c))
-            );
+        const onEdited = async (p: { id: number; chatId: number; text: string; editedUtc: string }) => {
+            const senderId = (msgs.find(x => x.id === p.id)?.senderId) ?? auth!.userId;
+            const plain = isEncrypted(p.text)
+                ? (await maybeDecryptMessage(senderId, p.text)) ?? p.text
+                : p.text;
+
+            setMsgs(prev => prev.map(m => (m.id === p.id ? { ...m, text: plain, editedUtc: p.editedUtc } : m)));
+            setChats(prev => prev.map(c => (c.id === p.chatId ? { ...c, lastText: plain, lastUtc: p.editedUtc } : c)));
         };
+
         const onDeleted = (p: { id: number; chatId: number }) => {
             const editedUtc = new Date().toISOString();
-            setMsgs((prev) => prev.map((m) => (m.id === p.id ? { ...m, isDeleted: true, text: "", editedUtc } : m)));
-            setChats((prev) =>
-                prev.map((c) => (c.id === p.chatId ? { ...c, lastText: "Сообщение удалено", lastUtc: editedUtc } : c))
-            );
+            setMsgs(prev => prev.map(m => (m.id === p.id ? { ...m, isDeleted: true, text: "", editedUtc } : m)));
+            setChats(prev => prev.map(c => (c.id === p.chatId ? { ...c, lastText: "Сообщение удалено", lastUtc: editedUtc } : c)));
         };
 
         hub.onEdited(onEdited);
         hub.onDeleted(onDeleted);
         return () => { hub.offEdited(onEdited); hub.offDeleted(onDeleted); };
-    }, [hub]);
-
+    }, [hub, msgs, auth?.userId]);
 
     // реакции с хаба
     useEffect(() => {
@@ -418,8 +419,19 @@ export default function App() {
             api.myChats(),
             api.getChatMembers(id),
         ]);
-        setMsgs(data);
-        setChats(list);
+
+        const decrypted = await Promise.all(
+            data.map(async m => {
+                if (isEncrypted(m.text)) {
+                    const pt = await maybeDecryptMessage(m.senderId, m.text);
+                    return { ...m, text: pt ?? m.text };
+                }
+                return m;
+            })
+        );
+
+        setMsgs(decrypted);
+        setChats(await decryptPreviews(list));
         setMembers(mem);
         setCursor(data.length ? data[0].sentUtc : undefined);
     }
@@ -428,17 +440,50 @@ export default function App() {
         if (!active || !cursor) return;
         const older = await api.messages(active, cursor);
         if (!older.length) return;
-        setMsgs((prev) => [...older, ...prev]);
+
+        const decrypted = await Promise.all(
+            older.map(async m => {
+                if (isEncrypted(m.text)) {
+                    const pt = await maybeDecryptMessage(m.senderId, m.text);
+                    return { ...m, text: pt ?? m.text };
+                }
+                return m;
+            })
+        );
+
+        setMsgs((prev) => [...decrypted, ...prev]);
         setCursor(older[0].sentUtc);
     }
 
     async function send(text: string, attachments?: number[]) {
         if (!active) return;
-        await api.sendMessage(active, text, attachments && attachments.length ? attachments : undefined);
+        const oppId = !activeChat?.isGroup ? activeChat?.opponentId : undefined;
+        await api.sendMessage(
+            active,
+            text,
+            attachments && attachments.length ? attachments : undefined,
+            oppId
+        );
+    }
+
+    function isDual(s?: string) { return !!s && s.startsWith("E2EED1:"); }
+    function isV1(s?: string) { return !!s && s.startsWith("E2EE1:"); }
+
+    async function decryptPreviews(list: Chat[]): Promise<Chat[]> {
+        return Promise.all(list.map(async c => {
+            if (!c.isGroup && c.lastText && (isV1(c.lastText) || isDual(c.lastText))) {
+                const senderId = c.lastSenderId ?? auth!.userId;
+                try {
+                    const pt = await maybeDecryptMessage(senderId, c.lastText);
+                    return { ...c, lastText: pt ?? c.lastText };
+                } catch { /* ignore */ }
+            }
+            return c;
+        }));
     }
 
     function upload(file: File, onProgress?: (p: number) => void) {
-        return uploadWithProgress(file, onProgress);
+        return uploadEncryptedWithProgress(file, onProgress);
     }
 
     const pingTyping = () => { if (active) void hub.typing(active); };
@@ -454,16 +499,22 @@ export default function App() {
     }, [typingByChat, active, members, auth?.userId]);
 
     function doLogout() {
-        logoutThisTab(); setToken(null); setAuth(null); location.reload();
+        logoutThisTab(); setToken(null); setAuth(null); localStorage.removeItem("userId"); location.reload();
     }
 
-    async function editMessage(id: number, text: string) {
+    async function editMessage(id: number, newText: string) {
         const editedUtc = new Date().toISOString();
-        setMsgs((prev) => prev.map((m) => (m.id === id ? { ...m, text, editedUtc } : m)));
-        setChats((prev) =>
-            prev.map((c) => (c.id === active ? { ...c, lastText: text, lastUtc: editedUtc, lastSenderId: auth!.userId } : c))
+
+        setMsgs(prev => prev.map(m => (m.id === id ? { ...m, text: newText, editedUtc } : m)));
+        setChats(prev =>
+            prev.map(c => (c.id === active ? { ...c, lastText: newText, lastUtc: editedUtc, lastSenderId: auth!.userId } : c))
         );
-        await api.editMessage(id, text);
+
+        if (!activeChat?.isGroup && activeChat?.opponentId) {
+            await editMessageE2EE(id, newText, activeChat.opponentId);
+        } else {
+            await api.editMessage(id, newText);
+        }
     }
 
     async function deleteMessage(id: number) {
@@ -500,11 +551,10 @@ export default function App() {
         if (!active) return;
         try {
             await api.markSeen(active, upToMessageId);
-            // локально подсветим «мои» галочки без ожидания события
             setMembers(prev => prev.map(m =>
                 m.id === auth!.userId ? { ...m, lastSeenMessageId: upToMessageId } : m
             ));
-        } catch {}
+        } catch { }
     }
 
     // ---------- AUTH SCREENS ----------
@@ -512,18 +562,28 @@ export default function App() {
         return authMode === "login" ? (
             <div style={{ display: "grid", placeItems: "center", height: "100vh" }}>
                 <LoginForm
-                    onLogin={(token, userId, name) => {
+                    onLogin={async (token, userId, name) => {
                         const acc: StoredAccount = { token, userId, name };
-                        setToken(token); saveAuthToStorage(acc); setAuth(acc);
+                        setToken(token);
+                        saveAuthToStorage(acc);
+                        setAuth(acc);
+                        localStorage.setItem("userId", String(userId));
+                        setActiveE2EEUser(userId);
+                        await postLoginInit(userId);
                     }}
                     onSwitchToRegister={() => setAuthMode("register")}
                 />
             </div>
         ) : (
             <RegisterForm
-                onDone={(token, userId, name) => {
+                onDone={async (token, userId, name) => {
                     const acc: StoredAccount = { token, userId, name };
-                    setToken(token); saveAuthToStorage(acc); setAuth(acc);
+                    setToken(token);
+                    saveAuthToStorage(acc);
+                    setAuth(acc);
+                    localStorage.setItem("userId", String(userId));
+                    setActiveE2EEUser(userId);
+                    await postLoginInit(userId);
                 }}
                 onCancel={() => setAuthMode("login")}
             />
@@ -541,8 +601,23 @@ export default function App() {
                     onSearch={() => setShowSearch(true)}
                     onNewChat={() => setShowCreateChat(true)}
                     onLogout={doLogout}
+                    onResetE2EE={async () => {
+                        await reinstallMyKeys(authFetch, auth.userId);
+                        alert("Ключи пересозданы и загружены. Отправьте новое сообщение для проверки.");
+                    }}
                 />
             </div>
+
+            {keyAlert && (
+                <div style={{
+                    position: "fixed", bottom: 12, left: 12, right: 12, zIndex: 1000,
+                    background: "#fff3cd", color: "#664d03", border: "1px solid #ffe69c",
+                    borderRadius: 10, padding: "10px 12px", display: "flex", gap: 10, alignItems: "center"
+                }}>
+                    <span>Код безопасности контакта изменился. Проверьте по другому каналу.</span>
+                    <button style={{ marginLeft: "auto" }} onClick={() => setKeyAlert(null)}>Ок</button>
+                </div>
+            )}
 
             {showProfile && <ProfilePanel onClose={() => setShowProfile(false)} />}
 
@@ -578,7 +653,7 @@ export default function App() {
                 typingByChat={typingByChat}
                 presence={presence}
             />
-            <div style={{ display:'flex', flexDirection:'column', minHeight:0, height:'100svh', width:'100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100svh', width: '100%' }}>
 
                 <ChatWindow
                     title={activeChat?.title}
@@ -599,7 +674,11 @@ export default function App() {
                     onDirectMessage={dmTo}
                     onLeaveChat={leaveActiveChat}
                     onSeen={markSeen}
-
+                    onRefreshPeerKey={async () => {
+                        if (!activeChat || activeChat.isGroup || !activeChat.opponentId) return;
+                        await forceRefreshRecipientKeys(activeChat.opponentId, authFetch);
+                        alert("Ключ контакта перечитан. Отправьте новое сообщение и проверьте расшифровку.");
+                    }}
                 />
             </div>
         </div>

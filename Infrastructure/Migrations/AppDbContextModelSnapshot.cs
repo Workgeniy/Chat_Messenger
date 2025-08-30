@@ -238,6 +238,9 @@ namespace Infrastructure.Migrations
                     b.Property<string>("AvatarUrl")
                         .HasColumnType("text");
 
+                    b.Property<string>("EcdhPublicJwk")
+                        .HasColumnType("text");
+
                     b.Property<string>("Email")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -258,6 +261,9 @@ namespace Infrastructure.Migrations
 
                     b.Property<string>("Password")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SignPublicJwk")
                         .HasColumnType("text");
 
                     b.HasKey("Id");

@@ -8,9 +8,12 @@ dayjs.extend(localizedFormat);
 import styles from "./ChatWindow.module.css";
 import { Attachment } from "./Attachment";
 import { AttachedChip } from "./AttachedChip";
-
+import { maybeDecryptMessage } from "../../lib/api";
+import { getPinnedFingerprint, formatSafetyCode } from "../../lib/crypto";
 
 /** ----- Types ----- */
+type MsgWithPlain = Msg & { plaintext?: string };
+
 export type Reaction = { emoji: string; count: number; mine?: boolean };
 
 export type Msg = {
@@ -59,11 +62,15 @@ type Props = {
     onLeaveChat?: () => void;
 
     onSeen?: (upToMessageId: number) => void;
+
+    onRefreshPeerKey?: () => void;
 };
 
 const MENU_PADDING = 8;
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "👏", "😍", "😎", "🎉"];
+
+
 
 export default function ChatWindow(props: Props) {
     const {
@@ -86,11 +93,26 @@ export default function ChatWindow(props: Props) {
 
     const [showComposerPicker, setShowComposerPicker] = useState(false);
 
+    const [rendered, setRendered] = useState<MsgWithPlain[]>(messages);
+
     const shouldStickRef = useRef(true);
 
     const longPressTimersRef = useRef<Map<number, number>>(new Map());
 
     const lastSeenSentRef = useRef<number | null>(null);
+
+    const opponentId = useMemo(() => {
+        if (props.isGroup) return null;
+        const other = (props.members ?? []).find(m => m.id !== userId);
+        return other?.id ?? null;
+    }, [props.isGroup, props.members, userId]);
+
+    const [showSec, setShowSec] = useState(false);
+    const tofu = opponentId ? getPinnedFingerprint(opponentId) : null;
+    const safety = tofu ? formatSafetyCode(tofu.fp) : "не подтверждено";
+
+    useEffect(() => { setRendered(messages as MsgWithPlain[]); }, [messages]);
+
     useEffect(() => {
         if (!onSeen || messages.length === 0) return;
         const lastId = messages[messages.length - 1].id;
@@ -101,20 +123,33 @@ export default function ChatWindow(props: Props) {
     }, [messages.length, onSeen]);
 
 
+    useEffect(() => {
+        if (!showSec) return;
+        const h = (e: MouseEvent) => {
+            const p = (e.target as Node);
+            const pop = document.querySelector(`.${styles.secPopover}`);
+            const btn = document.querySelector(`.${styles.secBtn}`);
+            if (pop && !pop.contains(p) && btn && !btn.contains(p)) setShowSec(false);
+        };
+        document.addEventListener('mousedown', h);
+        return () => document.removeEventListener('mousedown', h);
+    }, [showSec]);
+
+
     /** Группировка по датам */
     const itemsWithDateBreaks = useMemo(() => {
-        const res: Array<{ kind: "date"; label: string } | { kind: "msg"; m: Msg }> = [];
-        let last: string | null = null;
-        for (const m of messages) {
-            const label = dayjs(m.sentUtc).format("DD MMMM YYYY");
-            if (label !== last) {
-                res.push({ kind: "date", label });
-                last = label;
+        const res: Array<{ kind: "date"; label: string; key: string } | { kind: "msg"; m: MsgWithPlain }> = [];
+        let lastDay = -1;
+        for (const m of rendered) {
+            const dayKey = dayjs(m.sentUtc).startOf("day").valueOf();
+            if (dayKey !== lastDay) {
+                res.push({ kind: "date", label: dayjs(m.sentUtc).format("DD MMMM YYYY"), key: `d-${dayKey}` });
+                lastDay = dayKey;
             }
             res.push({ kind: "msg", m });
         }
         return res;
-    }, [messages]);
+    }, [rendered]);
 
     /** ----- Автоскролл ----- */
     useLayoutEffect(() => {
@@ -137,6 +172,9 @@ export default function ChatWindow(props: Props) {
             });
         }
     }
+
+
+
     useEffect(() => {
         const el = listRef.current;
         if (!el) return;
@@ -292,7 +330,7 @@ export default function ChatWindow(props: Props) {
     }
 
     /** Рендер сообщения */
-    function renderMessage(m: Msg) {
+    function renderMessage(m: MsgWithPlain) {
         const mine = m.senderId === userId;
         const isEditing = editingId === m.id;
         const others = (members ?? []).filter(u => u.id !== userId);
@@ -328,7 +366,8 @@ export default function ChatWindow(props: Props) {
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                         const nt = editText.trim();
-                                        if (nt && nt !== m.text && onEdit) {
+                                        const base = (m.plaintext ?? m.text ?? "").toString();
+                                        if (nt && nt !== base && onEdit) {
                                             Promise.resolve(onEdit(m.id, nt)).finally(() => {
                                                 setEditingId(null);
                                                 setEditText("");
@@ -346,6 +385,7 @@ export default function ChatWindow(props: Props) {
                                         setMenuFor(null);
                                     }
                                 }}
+
                                 autoFocus
                                 placeholder="Изменить сообщение"
                             />
@@ -353,7 +393,8 @@ export default function ChatWindow(props: Props) {
                                 <button
                                     onClick={() => {
                                         const nt = editText.trim();
-                                        if (nt && nt !== m.text && onEdit) {
+                                        const base = (m.plaintext ?? m.text ?? "").toString();
+                                        if (nt && nt !== base && onEdit) {
                                             Promise.resolve(onEdit(m.id, nt)).finally(() => {
                                                 setEditingId(null);
                                                 setEditText("");
@@ -365,6 +406,7 @@ export default function ChatWindow(props: Props) {
                                             setMenuFor(null);
                                         }
                                     }}
+
                                 >
                                     Сохранить
                                 </button>
@@ -375,10 +417,12 @@ export default function ChatWindow(props: Props) {
                         </div>
                     ) : (
                         <>
-                            {m.text && <div className={styles.text}>{m.text}</div>}
+                            { (m.plaintext ?? m.text) && (
+                                <div className={styles.text}>{m.plaintext ?? m.text}</div>
+                            )}
                             {m.attachments?.length ? (
                                 <div className={styles.attachments} onClick={(e) => e.stopPropagation()}>
-                                    {m.attachments.map((a) => <Attachment key={String(a.id)} a={a} />)}
+                                    {m.attachments?.map(a => <Attachment key={`att:${a.id}`} a={a} />)}
                                 </div>
                             ) : null}
                         </>
@@ -432,10 +476,9 @@ export default function ChatWindow(props: Props) {
                                 alt=""
                                 style={{ width: 32, height: 32, borderRadius: "50%" }}
                             />
-                            {/* если хочешь зелёную точку и тут — добавь */}
-                            {/* <span className={styles.dotHeader} /> */}
                         </div>
                     )}
+
                     <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
                         <span>{title ?? "Выберите чат"}</span>
                         {!!typingUsers.length && (
@@ -444,14 +487,37 @@ export default function ChatWindow(props: Props) {
         </span>
                         )}
                     </div>
+
+                    {/* 🔐 кнопка справа от заголовка */}
+                    {!props.isGroup && opponentId && (
+                        <div style={{ position: "relative", marginLeft: 8 }}>
+                            <button
+                                type="button"
+                                className={styles.secBtn}
+                                title="Код безопасности"
+                                onClick={() => setShowSec(v => !v)}
+                            >
+                                🔐
+                            </button>
+                            {showSec && (
+                                <div className={styles.secPopover} onMouseLeave={() => setShowSec(false)}>
+                                    <div className={styles.secTitle}>Код безопасности</div>
+                                    <div className={styles.secCode}>{safety}</div>
+                                    {tofu?.changed && <div className={styles.secWarn}>Отпечаток изменился</div>}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </header>
 
+
+
             {/* Messages */}
             <div ref={listRef} className={styles.list} onScroll={onScroll}>
-                {itemsWithDateBreaks.map((it, i) =>
+                {itemsWithDateBreaks.map(it =>
                     it.kind === "date"
-                        ? <div key={`d-${i}`} className={styles.dateDivider}><span>{it.label}</span></div>
+                        ? <div key={it.key} className={styles.dateDivider}><span>{it.label}</span></div>
                         : renderMessage(it.m)
                 )}
                 <div ref={bottomRef} />
@@ -481,7 +547,7 @@ export default function ChatWindow(props: Props) {
 
                     <div className={styles.menuLine} />
                     {(() => {
-                        const m = messages.find((x) => x.id === menuFor);
+                        const m = rendered.find((x) => x.id === menuFor);
                         if (!m || m.isDeleted) return null;
                         const mine = m.senderId === userId;
                         return (
@@ -494,7 +560,7 @@ export default function ChatWindow(props: Props) {
                                             ev.preventDefault();
                                             ev.stopPropagation();
                                             setEditingId(m.id);
-                                            setEditText(m.text ?? "");
+                                            setEditText((m.plaintext ?? m.text ?? ""));
                                             setMenuFor(null);
                                         }}
                                     >
