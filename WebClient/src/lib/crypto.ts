@@ -1,4 +1,3 @@
-// src/lib/crypto.ts — ПОЛНАЯ ВЕРСИЯ С ПРАВКАМИ
 
 let CURRENT_UID: number | null = null;
 export function setActiveE2EEUser(userId: number) { CURRENT_UID = userId; }
@@ -49,12 +48,12 @@ function canonicalStringify(obj: any): string {
 }
 
 // импорт JWK
-async function importJwk<T extends CryptoKeyUsage>(
+async function importJwk(
     jwk: JsonWebKey,
     algo: EcKeyImportParams | HmacImportParams | RsaHashedImportParams | AesKeyGenParams,
-    usages: T[]
+    usages: KeyUsage[]
 ): Promise<CryptoKey> {
-    return await subtle.importKey("jwk", jwk, algo as any, true, usages as any);
+    return crypto.subtle.importKey("jwk", jwk, algo as any, true, usages as any);
 }
 
 /* =========================
@@ -113,7 +112,7 @@ export async function encryptForUser(
 
     // 5) вложим наш публичный ключ подписи (важно для верификации старых сообщений)
     const senderSignPubJwk = JSON.parse(localStorage.getItem(K_pubSign())!);
-    const out: CipherV1 = { v:"e2ee:v1", ephPubJwk, iv:b64(iv.buffer), ct:b64(ctBuf), sig:b64(sigBuf), senderSignPubJwk };
+    const out: CipherV1 = { v:"e2ee:v1", ephPubJwk, iv:b64(ivU8.buffer), ct:b64(ctBuf), sig:b64(sigBuf), senderSignPubJwk };
     return "E2EE1:" + btoa(JSON.stringify(out));
 
 }

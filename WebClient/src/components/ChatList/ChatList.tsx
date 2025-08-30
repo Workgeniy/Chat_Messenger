@@ -1,7 +1,8 @@
 // ChatList.tsx
 import styles from "./ChatList.module.css";
 import type { Chat } from "../../lib/api";
-import { toFullUrl, fallbackAvatar } from "../../lib/url";
+import { fallbackAvatar } from "../../lib/url";
+import {AuthImg} from "../common/AuthImg.tsx";
 
 export function ChatList({
                              items, activeId, onOpen, myId, typingByChat, presence
@@ -36,66 +37,59 @@ export function ChatList({
         return `был(а) ${pad(d.getDate())}.${pad(d.getMonth()+1)} в ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
-    return (
-        <aside className={styles.root}>
-            <div className={styles.header}>Диалоги</div>
-            <div className={styles.list}>
-                {items.map(c => {
-                    const src = toFullUrl(c.avatarUrl) || fallbackAvatar(c.title);
 
-                    // чей был последний текст
-                    const iAmSender = c.lastSenderId && c.lastSenderId === myId;
-                    const previewPrefix = iAmSender ? "Вы: " : "";
+        return (
+            <aside className={styles.root}>
+                <div className={styles.header}>Диалоги</div>
+                <div className={styles.list}>
+                    {items.map(c => {
+                        // аватарка из чата (или, если добавишь на бэке opponentAvatarUrl, поставь его приоритетно)
+                        const rawAvatar = c.avatarUrl ?? undefined;
+                        const fallback = fallbackAvatar(c.title);
 
-                    // печатает…
-                    const typingNow = typingByChat?.has(c.id);
+                        const iAmSender = c.lastSenderId && c.lastSenderId === myId;
+                        const previewPrefix = iAmSender ? "Вы: " : "";
 
-                    // presence приоритетнее полей в чате (если прокинут)
-                    const info = (!c.isGroup && c.opponentId) ? presence?.get(c.opponentId) : undefined;
-                    const isOnline = !!info?.isOnline;
-                    const lastSeenUtc = info ? info.lastSeenUtc : (c.lastSeenUtc ?? null);
+                        const typingNow = typingByChat?.has(c.id);
 
-                    const sub =
-                        typingNow ? "печатает…"
-                            : (!c.isGroup && !isOnline && lastSeenUtc) ? formatLastSeen(lastSeenUtc)
-                                : (c.lastText ? `${previewPrefix}${c.lastText}` : "Нет сообщений");
+                        const info = (!c.isGroup && c.opponentId) ? presence?.get(c.opponentId) : undefined;
+                        const isOnline = !!info?.isOnline;
+                        const lastSeenUtc = info ? info.lastSeenUtc : (c.lastSeenUtc ?? null);
 
-                    // если сервер даёт unreadCount — используем; иначе = 0
-                    const unreadCount = c.unreadCount && c.unreadCount > 0 ? c.unreadCount : 0;
+                        const sub =
+                            typingNow ? "печатает…"
+                                : (!c.isGroup && !isOnline && lastSeenUtc) ? formatLastSeen(lastSeenUtc)
+                                    : (c.lastText ? `${previewPrefix}${c.lastText}` : "Нет сообщений");
 
-                    return (
-                        <button
-                            key={c.id}
-                            onClick={() => onOpen(c.id)}
-                            className={`${styles.item} ${activeId === c.id ? styles.active : ""}`}
-                        >
-                            <div className={styles.avatarWrap}>
-                                <img src={src} className={styles.avatar} alt="" />
-                                {!c.isGroup && isOnline ? <span className={styles.dot} /> : null}
-                            </div>
+                        const unreadCount = c.unreadCount && c.unreadCount > 0 ? c.unreadCount : 0;
 
-                            <div className={styles.body}>
-                                <div className={styles.topRow}>
-                                    <div className={styles.title}>{c.title}</div>
-                                    {unreadCount > 0
-                                        ? <div className={styles.unreadBadge}>{unreadCount}</div>
-                                        : <div className={styles.time}>{fmtTime(c.lastUtc)}</div>}
+                        return (
+                            <button
+                                key={c.id}
+                                onClick={() => onOpen(c.id)}
+                                className={`${styles.item} ${activeId === c.id ? styles.active : ""}`}
+                            >
+                                <div className={styles.avatarWrap}>
+                                    <AuthImg src={rawAvatar} fallback={fallback} className={styles.avatar} alt="" />
+                                    {!c.isGroup && isOnline ? <span className={styles.dot} /> : null}
                                 </div>
 
-                                <div
-                                    className={`${styles.preview} ${typingNow ? styles.typing : ""}`}
-                                    title={c.lastText || ""}
-                                >
-                                    {sub}
+                                <div className={styles.body}>
+                                    <div className={styles.topRow}>
+                                        <div className={styles.title}>{c.title}</div>
+                                        {unreadCount > 0
+                                            ? <div className={styles.unreadBadge}>{unreadCount}</div>
+                                            : <div className={styles.time}>{fmtTime(c.lastUtc)}</div>}
+                                    </div>
+
+                                    <div className={`${styles.preview} ${typingNow ? styles.typing : ""}`} title={c.lastText || ""}>
+                                        {sub}
+                                    </div>
                                 </div>
-                            </div>
-                        </button>
-                    );
-                })}
-
-
-
-            </div>
-        </aside>
-    );
+                            </button>
+                        );
+                    })}
+                </div>
+            </aside>
+        );
 }

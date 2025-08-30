@@ -10,6 +10,7 @@ type Props = {
     onSearch: () => void;
     onNewChat: () => void;
     onLogout: () => void;
+    onResetE2EE?: () => Promise<void> | void;
 };
 
 export default function AvatarMenu({

@@ -3,8 +3,6 @@ import {
     encryptForUser,
     tryDecryptFrom,
     selfTestE2EE,
-    resetMyE2EEStorage,
-    setActiveE2EEUser
 } from "./crypto";
 
 export type Chat = {
@@ -111,6 +109,12 @@ function getSecretsFor(ids: number[] | undefined): AttSecret[] {
     if (!ids?.length) return [];
     const m = readSecretsMap();
     return ids.map(id => m[String(id)]).filter(Boolean) as AttSecret[];
+}
+
+export function getAttachmentLocalMeta(id: number): { mime?: string; hasThumb?: boolean } | null {
+    const s = getSecretById(id);
+    if (!s) return null;
+    return { mime: s.mime, hasThumb: !!s.thumbId && !!s.thumbIv };
 }
 
 export type StoredAccount = {
@@ -303,48 +307,35 @@ export async function postLoginInit(userId?: number) {
 }
 
 // ——— Загрузка с прогрессом ———
-export async function uploadWithProgress(
-    file: File,
-    onProgress?: (p: number) => void
-): Promise<{ id: number; url?: string; thumbUrl?: string }> {
-
-    const bearer = token || localStorage.getItem("token");
-
-    return await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `${API}/attachments`, true);
-        if (bearer) xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
-
-        xhr.upload.onprogress = (ev) => {
-            if (ev.lengthComputable && onProgress) {
-                const p = Math.max(0, Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
-                onProgress(p);
-            }
-        };
-
-        xhr.onreadystatechange = () => {
-            if (xhr.readyState !== 4) return;
-
-            if (xhr.status >= 200 && xhr.status < 300) {
-                const txt = xhr.responseText?.trim() || "";
-                if (!txt) { resolve({ id: NaN }); return; }
-                try { resolve(JSON.parse(txt)); }
-                catch { reject(new Error("Bad JSON from /attachments")); }
-            } else {
-                const msg = xhr.responseText || `HTTP ${xhr.status}`;
-                console.error("upload failed:", msg);
-                reject(new Error(msg));
-            }
-        };
-
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.onabort = () => reject(new Error("Upload aborted"));
-
-        const form = new FormData();
-        form.append("file", file);
-        xhr.send(form);
-    });
-}
+// export async function uploadWithProgress(
+//     file: File,
+//     onProgress?: (p: number) => void
+// ): Promise<{ id: number; url?: string; thumbUrl?: string }> {
+//
+//     const bearer = token || localStorage.getItem("token");
+//
+//     const id = await new Promise<number>((resolve, reject) => {
+//         const xhr = new XMLHttpRequest();
+//         xhr.open("POST", `${API}/attachments`, true);            // строго через API, не "/api/..."
+//         const bearer = localStorage.getItem("token");            // берём токен
+//         if (bearer) xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
+//
+//         xhr.upload.onprogress = (ev) => { if (ev.lengthComputable && onProgress) onProgress(Math.round((ev.loaded/ev.total)*100)); };
+//         xhr.onreadystatechange = () => {
+//             if (xhr.readyState !== 4) return;
+//             if (xhr.status >= 200 && xhr.status < 300) {
+//                 try { resolve(JSON.parse(xhr.responseText).id); } catch { reject(new Error("bad JSON from /attachments")); }
+//             } else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
+//         };
+//         xhr.onerror = () => reject(new Error("Network error"));
+//         xhr.onabort  = () => reject(new Error("Upload aborted"));
+//
+//         const form = new FormData();
+//         form.append("file", new Blob([ct], { type: "application/octet-stream" }), file.name + ".enc");
+//         xhr.send(form);
+//     });
+//
+// }
 
 export async function uploadEncryptedWithProgress(
     file: File,
@@ -361,6 +352,7 @@ export async function uploadEncryptedWithProgress(
 
     let thumbId: number | undefined;
     let thumbIvB64: string | undefined;
+
     if (file.type.startsWith("image/")) {
         try {
             const thumbBlob = await makeImageThumbBlob(file, 512);
@@ -368,7 +360,9 @@ export async function uploadEncryptedWithProgress(
             const thumbCt = await aesGcmEncryptToBlob(keyB64, thumbIvB64, await thumbBlob.arrayBuffer());
             const formThumb = new FormData();
             formThumb.append("file", new Blob([thumbCt], { type: "application/octet-stream" }), file.name + ".thumb.enc");
-            const resT = await fetch(`${API}/attachments`, { method: "POST", body: formThumb, credentials: "include" });
+
+            // важно: авторизованный запрос
+            const resT = await authFetch(`${API}/attachments`, { method: "POST", body: formThumb });
             if (!resT.ok) throw new Error(await resT.text());
             const jT = await resT.json();
             thumbId = jT.id;
@@ -380,8 +374,9 @@ export async function uploadEncryptedWithProgress(
     const id = await new Promise<number>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${API}/attachments`, true);
-        const bearer = (typeof localStorage !== "undefined" && (localStorage.getItem("token"))) || null;
+        const bearer = token || localStorage.getItem("token");
         if (bearer) xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
+
         xhr.upload.onprogress = (ev) => { if (ev.lengthComputable && onProgress) onProgress(Math.round((ev.loaded / ev.total) * 100)); };
         xhr.onreadystatechange = () => {
             if (xhr.readyState !== 4) return;
@@ -391,6 +386,8 @@ export async function uploadEncryptedWithProgress(
         };
         xhr.onerror = () => reject(new Error("Network error"));
         xhr.onabort = () => reject(new Error("Upload aborted"));
+        const form = new FormData();
+        form.append("file", new Blob([ct], { type: "application/octet-stream" }), file.name + ".enc");
         xhr.send(form);
     });
 
@@ -460,9 +457,6 @@ export async function maybeDecryptMessage(senderId: number, text: string): Promi
 async function sha256(ab: ArrayBuffer): Promise<string> {
     const h = await crypto.subtle.digest("SHA-256", ab);
     return btoa(String.fromCharCode(...new Uint8Array(h)));
-}
-function b64(a: ArrayBuffer): string {
-    return btoa(String.fromCharCode(...new Uint8Array(a)));
 }
 function b64d(s: string): ArrayBuffer {
     const bin = atob(s); const u8 = new Uint8Array(bin.length);

@@ -1,135 +1,155 @@
-import styles from "./Attachment.module.css";
-import { useEffect, useState } from "react";
-import {authFetch, fetchAndDecryptAttachment} from "../../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { fetchAndDecryptAttachment, fetchAndDecryptThumb, getAttachmentLocalMeta } from "../../lib/api";
 
-type A = {
-    id: number | string;
-    url?: string;
-    thumbUrl?: string;
-    contentType?: string;
-    fileName?: string;
-    sizeBytes?: number;
-};
+type Att = { id: number | string; url?: string; contentType?: string; fileName?: string; sizeBytes?: number; };
 
-export function humanSize(bytes?: number) {
-    if (bytes === undefined || bytes === null) return "";
-    const u = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
-    let i = 0; let n = bytes;
-    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-    return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
-}
+export function Attachment({ a }: { a: Att }) {
+    const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+    const [downloading, setDownloading] = useState(false);
+    const [viewer, setViewer] = useState<{ open: boolean; blobUrl?: string; mime?: string }>({ open: false });
 
-export function Attachment({ a }: { a: A }) {
-    const [thumbUrl] = useState<string | null>(null);
-    const [isEncrypted] = useState(false);
-    const [plainPreviewUrl, setPlainPreviewUrl] = useState<string | null>(null);
-    const isImage = (a.contentType || "").startsWith("image/");
-    const isVideo = (a.contentType || "").startsWith("video/");
-    const name = a.fileName || `file_${a.id}`;
-    const size = humanSize(a.sizeBytes);
+    const idNum = Number(a.id);
+    const local = getAttachmentLocalMeta(idNum);
+    const mime = (local?.mime || a.contentType || "").toLowerCase();
+    const isImage = mime.startsWith("image/");
 
-    // Пытаемся подгрузить расшифрованную миниатюру (если это шифрованная картинка)
     useEffect(() => {
-        let u: string | null = null;
+        let revoke: string | null = null;
         (async () => {
-            if (!isImage || isEncrypted) return;
-            const idNum = Number(a.id);
-            if (!Number.isFinite(idNum)) return;
+            if (!isImage || !Number.isFinite(idNum)) return;
             try {
-                const res = await authFetch(`${API}/attachments/${idNum}`);
-                if (!res.ok) return;
-                const blob = await res.blob();
-                u = URL.createObjectURL(blob);
-                setPlainPreviewUrl(u);
-            } catch {/* ignore */}
+                let blob: Blob | null = null;
+                try { blob = await fetchAndDecryptThumb(idNum); } catch {}
+                if (!blob) blob = await fetchAndDecryptAttachment(idNum);
+                const u = URL.createObjectURL(blob);
+                setThumbUrl(u); revoke = u;
+            } catch {}
         })();
-        return () => { if (u) URL.revokeObjectURL(u); };
-    }, [a.id, isImage, isEncrypted]);
+        return () => { if (revoke) URL.revokeObjectURL(revoke); };
+    }, [idNum, isImage]);
 
-    async function onDownload() {
+    async function download() {
         try {
-            const blob = await fetchAndDecryptAttachment(Number(a.id));
-            const u = URL.createObjectURL(blob);
+            setDownloading(true);
+            const blob = await fetchAndDecryptAttachment(idNum);
+            const url = URL.createObjectURL(blob);
             const aTag = document.createElement("a");
-            aTag.href = u;
-            aTag.download = name || "file";
+            aTag.href = url;
+            aTag.download = a.fileName || `attachment_${a.id}`;
             document.body.appendChild(aTag);
             aTag.click();
             aTag.remove();
-            setTimeout(() => URL.revokeObjectURL(u), 1500);
-        } catch {
-            // fallback: если незашифровано — просто открыть ссылку
-            if (a.url) window.open(a.url, "_blank");
-        }
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+        } finally { setDownloading(false); }
     }
 
-    async function onOpen() {
+    async function openViewer() {
         try {
-            const blob = await fetchAndDecryptAttachment(Number(a.id));
-            const u = URL.createObjectURL(blob);
-            window.open(u, "_blank");
-            setTimeout(() => URL.revokeObjectURL(u), 60_000);
-        } catch {
-            if (a.url) window.open(a.url, "_blank");
-        }
+            const blob = await fetchAndDecryptAttachment(idNum);
+            const url = URL.createObjectURL(blob);
+            setViewer({ open: true, blobUrl: url, mime: mime || blob.type || "application/octet-stream" });
+        } catch {}
+    }
+    function closeViewer() {
+        if (viewer.blobUrl) URL.revokeObjectURL(viewer.blobUrl);
+        setViewer({ open: false });
     }
 
+    const prettySize = useMemo(() => {
+        const s = a.sizeBytes ?? 0; if (!s) return "";
+        const u = ["B","KB","MB","GB"]; let n=s,i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;}
+        return `${n.toFixed(i===0?0:1)} ${u[i]}`;
+    }, [a.sizeBytes]);
 
     return (
-        <div className={styles.card}>
-            <div className={styles.previewBox}>
-                {/* PREVIEW */}
-                {isImage ? (
-                    isEncrypted && thumbUrl ? (
-                        <img src={thumbUrl} alt={name} className={styles.thumb} />
-                    ) : plainPreviewUrl ? (
-                        <img src={plainPreviewUrl} alt={name} className={styles.thumb} />
+        <>
+            <div
+                onClick={(e) => { e.stopPropagation(); void openViewer(); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onTouchStart={(e) => e.stopPropagation()}
+                onTouchEnd={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+                style={{
+                    display:"flex", gap:10, alignItems:"center",
+                    padding:8, borderRadius:10, background:"rgba(0,0,0,0.06)",
+                    cursor:"pointer", minWidth:180, maxWidth:320
+                }}
+                title="Открыть"
+                role="button"
+            >
+                <div style={{
+                    width:64, height:64, borderRadius:8, overflow:"hidden",
+                    background:"#f3f3f3", display:"grid", placeItems:"center", flex:"0 0 auto"
+                }}>
+                    {isImage && thumbUrl ? (
+                        <img
+                            src={thumbUrl}
+                            alt=""
+                            draggable={false}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                            style={{ width:"100%", height:"100%", objectFit:"cover" }}
+                        />
                     ) : (
-                        <div className={styles.fileIcon}>🖼️</div>
-                    )
-                ) : isVideo ? (
-                    // Для шифрованного видео стрим-расшифровка не делается в MVP — предлагаем скачать/открыть.
-                    a.url && !isEncrypted ? (
-                        <video className={styles.video} src={a.url} poster={a.thumbUrl || undefined} controls />
-                    ) : (
-                        <div className={styles.fileIcon}>🎬</div>
-                    )
-                ) : (
-                    <div className={styles.fileIcon}>📄</div>
-                )}
+                        <div style={{ fontSize:28 }}>📎</div>
+                    )}
+                </div>
 
-                {/* ACTIONS */}
-                {isEncrypted ? (
-                    <div className={styles.actions}>
-                        <button className={styles.downloadBtn} title="Открыть" onClick={(e) => { e.stopPropagation(); onOpen(); }}>
-                            👁
-                        </button>
-                        <button className={styles.downloadBtn} title="Скачать" onClick={(e) => { e.stopPropagation(); onDownload(); }}>
-                            ⬇
-                        </button>
+                <div style={{ display:"grid", gap:4, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:600, whiteSpace:"nowrap", textOverflow:"ellipsis", overflow:"hidden", maxWidth:200 }}>
+                        {a.fileName || `attachment_${a.id}`}
                     </div>
-                ) : a.url ? (
-                    <a
-                        className={styles.downloadBtn}
-                        href={a.url}
-                        download
-                        title="Скачать"
-                        onClick={(e) => e.stopPropagation()}
+                    <div style={{ fontSize:12, opacity:.7 }}>
+                        {(mime || (a.contentType||"")).split(";")[0]} {prettySize && `• ${prettySize}`}
+                    </div>
+                    <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e)=>{ e.stopPropagation(); void download(); }}
+                        disabled={downloading}
+                        style={{
+                            marginTop:4, width:"fit-content", padding:"4px 8px",
+                            borderRadius:6, border:"1px solid rgba(0,0,0,0.15)",
+                            background:"#fff", fontSize:12, cursor:"pointer"
+                        }}
                     >
-                        ⬇
-                    </a>
-                ) : null}
-            </div>
-
-            <div className={styles.meta}>
-                <div className={styles.name} title={name}>{name}</div>
-                <div className={styles.sub}>
-                    {(a.contentType || "файл")}{size ? ` · ${size}` : ""}
-                    {isEncrypted ? " · 🔒" : ""}
+                        {downloading ? "…" : "Скачать"}
+                    </button>
                 </div>
             </div>
-        </div>
+
+            {viewer.open && (
+                <div
+                    onClick={closeViewer}
+                    style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"grid", placeItems:"center", zIndex:1000 }}
+                >
+                    <div
+                        onClick={(e)=>e.stopPropagation()}
+                        style={{ maxWidth:"90vw", maxHeight:"90vh", background:"#111", borderRadius:12, padding:12, display:"grid", placeItems:"center" }}
+                    >
+                        {viewer.mime?.startsWith("image/") ? (
+                            <img src={viewer.blobUrl} alt="" style={{ maxWidth:"88vw", maxHeight:"82vh", objectFit:"contain", borderRadius:8 }} />
+                        ) : viewer.mime?.startsWith("video/") ? (
+                            <video src={viewer.blobUrl} controls style={{ maxWidth:"88vw", maxHeight:"82vh" }} />
+                        ) : viewer.mime?.startsWith("audio/") ? (
+                            <audio src={viewer.blobUrl} controls style={{ width:"70vw" }} />
+                        ) : (
+                            <div style={{ color:"#fff" }}>
+                                Предпросмотр не поддерживается.
+                                <div style={{ marginTop:8 }}>
+                                    <a href={viewer.blobUrl} download={a.fileName || `attachment_${a.id}`} style={{ color:"#9cf" }}>
+                                        Скачать файл
+                                    </a>
+                                </div>
+                            </div>
+                        )}
+                        <button onClick={closeViewer} style={{ marginTop:12, padding:"6px 12px", borderRadius:8, background:"#fff", border:"none", cursor:"pointer" }}>
+                            Закрыть
+                        </button>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }
-
-export default Attachment;

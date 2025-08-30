@@ -566,6 +566,7 @@ export default function App() {
                         const acc: StoredAccount = { token, userId, name };
                         setToken(token);
                         saveAuthToStorage(acc);
+                        localStorage.setItem("token", token);
                         setAuth(acc);
                         localStorage.setItem("userId", String(userId));
                         setActiveE2EEUser(userId);
@@ -580,6 +581,7 @@ export default function App() {
                     const acc: StoredAccount = { token, userId, name };
                     setToken(token);
                     saveAuthToStorage(acc);
+                    localStorage.setItem("token", token);
                     setAuth(acc);
                     localStorage.setItem("userId", String(userId));
                     setActiveE2EEUser(userId);

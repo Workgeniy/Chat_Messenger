@@ -8,8 +8,8 @@ dayjs.extend(localizedFormat);
 import styles from "./ChatWindow.module.css";
 import { Attachment } from "./Attachment";
 import { AttachedChip } from "./AttachedChip";
-import { maybeDecryptMessage } from "../../lib/api";
 import { getPinnedFingerprint, formatSafetyCode } from "../../lib/crypto";
+import SecureImg from "../common/SecureImg.tsx";
 
 /** ----- Types ----- */
 type MsgWithPlain = Msg & { plaintext?: string };
@@ -421,8 +421,16 @@ export default function ChatWindow(props: Props) {
                                 <div className={styles.text}>{m.plaintext ?? m.text}</div>
                             )}
                             {m.attachments?.length ? (
-                                <div className={styles.attachments} onClick={(e) => e.stopPropagation()}>
-                                    {m.attachments?.map(a => <Attachment key={`att:${a.id}`} a={a} />)}
+                                <div
+                                    className={styles.attachments}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                    onTouchStart={(e) => e.stopPropagation()}
+                                    onTouchEnd={(e) => e.stopPropagation()}
+                                    onTouchMove={(e) => e.stopPropagation()}
+                                >
+                                    {m.attachments.map(a => <Attachment key={`att:${a.id}`} a={a} />)}
                                 </div>
                             ) : null}
                         </>
@@ -470,13 +478,12 @@ export default function ChatWindow(props: Props) {
             <header className={styles.header}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {avatarUrl && (
-                        <div style={{ position: "relative" }}>
-                            <img
-                                src={avatarUrl}
-                                alt=""
-                                style={{ width: 32, height: 32, borderRadius: "50%" }}
-                            />
-                        </div>
+                        <SecureImg
+                            src={avatarUrl}
+                            alt=""
+                            style={{ width: 32, height: 32, borderRadius: "50%" }}
+                            fallback={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(title || "U")}`}
+                        />
                     )}
 
                     <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>

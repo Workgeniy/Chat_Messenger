@@ -33,6 +33,7 @@ services:
     volumes:
       - avatars:/app/wwwroot/avatars   # чтобы не терять загруженные аватарки
 
+
   web:
     build:
       context: ./WebClient
@@ -45,9 +46,8 @@ services:
       - api
     ports:
       - "80:80"     # HTTP
-      # - "443:443" # HTTPS — если добавишь сертификаты внутрь контейнера
     volumes:
-      - avatars:/usr/share/nginx/html/avatars:ro # чтобы nginx отдавал аватарки тоже
+      - avatars:/usr/share/nginx/html/avatars:ro
 
 volumes:
   pgdata:

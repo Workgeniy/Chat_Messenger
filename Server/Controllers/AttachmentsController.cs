@@ -24,12 +24,11 @@ namespace Server.Controllers
         }
 
         [HttpPost]
-        [RequestSizeLimit(2L * 1024 * 1024 * 1024)] // 2GB (ты уже ставил в Kestrel)
+        [RequestSizeLimit(2L * 1024 * 1024 * 1024)] // 2GB
         public async Task<IActionResult> Upload([FromForm] IFormFile file)
         {
             if (file is null || file.Length == 0) return BadRequest("empty file");
 
-            // простая «прожарка» mime: по сигнатуре
             var mime = file.ContentType?.ToLowerInvariant() ?? "application/octet-stream";
             var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
 
@@ -109,25 +108,36 @@ namespace Server.Controllers
         {
             var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-            var file = await _db.Attachments
+            var att = await _db.Attachments
                 .Where(a => a.Id == id)
-                .Select(a => new {
-                    a.StoragePath,
-                    a.MimeType,
-                    InChat = _db.Messages
-                        .Any(m => m.Attachments.Any(ma => ma.Id == a.Id) &&
-                                  m.Chat.ChatUsers.Any(cu => cu.UserId == me))
-                })
-                .FirstOrDefaultAsync();
+                .Select(a => new { a.StoragePath, a.MimeType })
+                .SingleOrDefaultAsync();
 
-            if (file == null) return NotFound();
-            if (!file.InChat) return Forbid();
+            if (att == null) return NotFound();
 
-            var abs = Path.Combine(_env.ContentRootPath, file.StoragePath.TrimStart('/'));
-            return PhysicalFile(abs, file.MimeType, enableRangeProcessing: true);
+
+            var path = "/api/attachments/" + id;
+
+            var inChat = await _db.Messages.AnyAsync(m =>
+                m.Attachments.Any(ma => ma.Id == id) &&
+                m.Chat.ChatUsers.Any(cu => cu.UserId == me));
+
+            var isUserAvatar = await _db.Users.AnyAsync(u => u.AvatarUrl == path);
+
+            var isChatAvatarIMember = await _db.Chats.AnyAsync(c =>
+                c.AvatarUrl == path &&
+                c.ChatUsers.Any(cu => cu.UserId == me));
+
+
+            var allowed = inChat || isUserAvatar || isChatAvatarIMember;
+            if (!allowed) return Forbid();
+
+            var abs = Path.Combine(_env.ContentRootPath, att.StoragePath.TrimStart('/'));
+            return PhysicalFile(abs, att.MimeType, enableRangeProcessing: true);
         }
 
-        // Мини-воркер (FFmpeg), см. ниже
+
+
         private async Task TranscodeVideoAsync(int attId, string srcPath, string root)
         {
             try

@@ -66,3 +66,34 @@
     color: #6b7280;
     margin-top: 2px;
 }
+.modalBackdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    display: grid; place-items: center;
+    z-index: 1000;
+}
+.modal {
+    position: relative;
+    max-width: 92vw; max-height: 92vh;
+    background: #fff; border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.3);
+    padding: 12px;
+    display: flex; align-items: center; justify-content: center;
+}
+.modalContent {
+    max-width: 90vw; max-height: 85vh;
+    border-radius: 6px;
+}
+.modalClose {
+    position: absolute; top: 8px; right: 8px;
+    background: #f2f2f2; border: 0; border-radius: 6px; padding: 4px 8px; cursor: pointer;
+}
+.modalFallback { display: flex; flex-direction: column; align-items: center; }
+.actions {
+    position: absolute; right: 8px; bottom: 8px;
+    display: flex; gap: 6px;
+}
+.downloadBtn {
+    background: #fff; border: 1px solid #ddd; border-radius: 8px;
+    padding: 4px 8px; cursor: pointer;
+}
