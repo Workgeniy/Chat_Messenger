@@ -2,7 +2,7 @@
 import styles from "./ChatList.module.css";
 import type { Chat } from "../../lib/api";
 import { fallbackAvatar } from "../../lib/url";
-import {AuthImg} from "../common/AuthImg.tsx";
+import {AuthImg} from "../Common/AuthImg.tsx";
 
 export function ChatList({
                              items, activeId, onOpen, myId, typingByChat, presence

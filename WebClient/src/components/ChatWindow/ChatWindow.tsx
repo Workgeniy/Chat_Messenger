@@ -7,8 +7,8 @@ dayjs.locale("ru");
 dayjs.extend(localizedFormat);
 import styles from "./ChatWindow.module.css";
 import { Attachment } from "./Attachment";
-import SecureImg from "../common/SecureImg";
-import LinkifiedText from "../common/LinkifiedText";
+import SecureImg from "../Common/SecureImg";
+import LinkifiedText from "../Common/LinkifiedText";
 import MembersModal from "../Chats/MembersModal";
 import type { Participant as ApiParticipant} from "../../lib/api";
 
@@ -856,12 +856,12 @@ export default function ChatWindow(props: Props) {
                         onClose={() => setShowMembers(false)}
                         members={props.members ?? []}
                         myId={userId}
-                        onDM={(uid) => {
+                        onDM={(uid: number) => {
                             setShowMembers(false);
                             props.onDirectMessage?.(uid);
                         }}
                         isGroup={!!props.isGroup}
-                        onRemoveMember={async (uid) => {
+                        onRemoveMember={async (uid: number) => {
                             setShowMembers(false);
                             await props.onRemoveMember?.(uid);
                         }}
