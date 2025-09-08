@@ -7,9 +7,9 @@ dayjs.locale("ru");
 dayjs.extend(localizedFormat);
 import styles from "./ChatWindow.module.css";
 import { Attachment } from "./Attachment";
-import SecureImg from "../common/SecureImg.tsx";
-import LinkifiedText from "../common/LinkifiedText.tsx";
-import MembersModal from "../Chats/MembersModal.tsx";
+import SecureImg from "../common/SecureImg";
+import LinkifiedText from "../common/LinkifiedText";
+import MembersModal from "../Chats/MembersModal";
 import type { Participant as ApiParticipant} from "../../lib/api";
 
 /** ----- Types ----- */
