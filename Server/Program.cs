@@ -1,6 +1,7 @@
 ﻿using Core.Entities;
 using Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Server.Hubs;
@@ -31,6 +32,15 @@ builder.Services.AddCors(o =>
         .AllowAnyMethod()
         .AllowCredentials()
     ));
+
+builder.Services.Configure<ForwardedHeadersOptions>(opt =>
+{
+    opt.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                           ForwardedHeaders.XForwardedProto |
+                           ForwardedHeaders.XForwardedHost;
+    opt.KnownNetworks.Clear();
+    opt.KnownProxies.Clear();
+});
 
 // SignalR
 builder.Services.AddSignalR();
@@ -84,7 +94,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Без HTTPS в dev
+app.UseForwardedHeaders();
 
 app.UseStaticFiles();
 app.UseRouting();

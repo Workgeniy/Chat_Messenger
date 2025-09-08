@@ -28,7 +28,12 @@ import {
     logoutThisTab,
     type StoredAccount,
 } from "./lib/authStore";
-import { forceRefreshRecipientKeys, reinstallMyKeys, setActiveE2EEUser } from "./lib/crypto";
+import {
+    forceRefreshRecipientKeys,
+    initActiveUserFromLocalStorage,
+    reinstallMyKeys,
+    setActiveE2EEUser
+} from "./lib/crypto";
 
 export default function App() {
     // ---------- AUTH ----------
@@ -53,6 +58,11 @@ export default function App() {
     const [keyAlert, setKeyAlert] = useState<{ userId: number, oldFp: string, newFp: string } | null>(null);
 
     const [typingByChat, setTypingByChat] = useState<Map<number, Set<number>>>(new Map());
+    const [showAddMembers, setShowAddMembers] = useState(false);
+
+    const [isNarrow, setIsNarrow] = useState(
+        typeof window !== "undefined" && window.matchMedia("(max-width: 920px)").matches
+    );
 
     const [, setTyping] = useState<string[]>([]);
     const typingTimersRef = useRef<Map<string, any>>(new Map());
@@ -62,7 +72,24 @@ export default function App() {
     // hub с ленивым токеном
     const hub = useMemo(() => createHub(() => auth?.token ?? null), [auth]);
 
-    const isEncrypted = (s?: string) => !!s && (s.startsWith("E2EE1:") || s.startsWith("E2EED1:"));
+    const isEncrypted = (s?: string) =>
+        !!s && (s.startsWith("E2EE1:") || s.startsWith("E2EED1:") || s.startsWith("E2EEG1:"));
+
+
+    useEffect(() => {
+        document.title = "СhatFlow";
+    }, []);
+
+    useEffect(() => {
+        initActiveUserFromLocalStorage();
+        // если есть токен – подтянем me и догоним ключи
+        (async () => {
+            try {
+                const me = await api.me();
+                await postLoginInit(me.id);
+            } catch {}
+        })();
+    }, []);
 
     // подгрузка участников для активного чата
     useEffect(() => {
@@ -79,6 +106,13 @@ export default function App() {
         })();
         return () => { cancelled = true; };
     }, [active]);
+
+    useEffect(() => {
+        const mq = window.matchMedia("(max-width: 920px)");
+        const handler = () => setIsNarrow(mq.matches);
+        mq.addEventListener?.("change", handler);
+        return () => mq.removeEventListener?.("change", handler);
+    }, []);
 
     useEffect(() => {
         const onChatCreated = (p: {
@@ -244,7 +278,6 @@ export default function App() {
             if (m.chatId === active) {
                 setMsgs(prev => (prev.some(x => x.id === prepared.id) ? prev : [...prev, prepared]));
             }
-
             const preview = prepared.text || (m.attachments?.length ? "Вложение" : "");
 
             setChats(prev => {
@@ -277,6 +310,17 @@ export default function App() {
         hub.onMessage(handler);
         return () => hub.offMessage(handler);
     }, [active, hub, auth?.userId]);
+
+    useEffect(() => {
+        const onChatUpdated = (p: { id: number; avatarUrl?: string | null; title?: string | null }) => {
+            setChats(prev => prev.map(c =>
+                c.id === p.id ? { ...c, ...(p.avatarUrl !== undefined ? { avatarUrl: p.avatarUrl ?? undefined } : {}), ...(p.title ? { title: p.title } : {}) } : c
+            ));
+        };
+        hub.connection.on("ChatUpdated", onChatUpdated);
+        return () => hub.connection.off("ChatUpdated", onChatUpdated);
+    }, [hub]);
+
 
     useEffect(() => {
         const onCreated = (c: { id: number; title: string; avatarUrl?: string; isGroup: boolean }) => {
@@ -594,8 +638,10 @@ export default function App() {
 
     // ---------- MAIN UI ----------
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 32%) 1fr", height: "100vh", width: "100%" }}>
-            <div style={{ position: "fixed", top: 10, left: 10, zIndex: 60 }}>
+        <div className="app-shell" style={{ display: "grid", gridTemplateColumns:isNarrow ? "1fr" :
+                "minmax(320px, 32%) 1fr", height: "100vh", width: "100vw", maxWidth: "100%", overflow: "hidden" }}>
+            <div style={{ position: "fixed", top: 10, left: 10, zIndex: 60,
+                display: isNarrow && active ? "none" : "block" }}>
                 <AvatarMenu
                     name={auth.name}
                     avatarUrl={auth.avatarUrl ?? undefined}
@@ -634,6 +680,39 @@ export default function App() {
                 />
             )}
 
+            {showAddMembers && active && (
+                <SearchUsersModal
+                    currentUserId={auth.userId}
+                    excludeUserIds={members.map(m => m.id)}
+                    multiSelect
+                    onClose={() => setShowAddMembers(false)}
+                    // новый колбэк (добавь его в модалку), если есть мультивыбор
+                    onPickUsers={async (ids: number[]) => {
+                        if (!ids.length) return;
+                        try {
+                            await api.addChatMembers(active, ids);
+                            setShowAddMembers(false);
+                            setMembers(await api.getChatMembers(active)); // обновим список участников
+                        } catch (e) {
+                            console.error(e);
+                            alert("Не удалось добавить участников");
+                        }
+                    }}
+                    // fallback — если у модалки пока только onPick одного пользователя
+                    onPick={async (userId: number) => {
+                        try {
+                            await api.addChatMembers(active, [userId]);
+                            setShowAddMembers(false);
+                            setMembers(await api.getChatMembers(active));
+                        } catch (e) {
+                            console.error(e);
+                            alert("Не удалось добавить участника");
+                        }
+                    }}
+                />
+            )}
+
+
             {showCreateChat && (
                 <CreateChatModal
                     currentUserId={auth.userId}
@@ -647,16 +726,35 @@ export default function App() {
                 />
             )}
 
-            <ChatList
-                items={chats}
-                activeId={active}
-                onOpen={openChat}
-                myId={auth.userId}
-                typingByChat={typingByChat}
-                presence={presence}
-            />
-            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100svh', width: '100%' }}>
+            {/* Список чатов */}
+            <div
+                style={{
+                    display: isNarrow && active ? "none" : "block",
+                    height: "100%"
+                }}
+            >
+                <ChatList
+                    items={chats}
+                    activeId={active}
+                    onOpen={openChat}
+                    myId={auth.userId}
+                    typingByChat={typingByChat}
+                    presence={presence}
+                />
+            </div>
 
+            {/* Окно чата */}
+            <div
+                style={{
+                    display: isNarrow && !active ? "none" : "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
+                    height: "100svh",
+                    width: "100%",
+                    maxWidth: "100%",
+                    overflow: "hidden"
+                }}
+            >
                 <ChatWindow
                     title={activeChat?.title}
                     avatarUrl={activeChat?.avatarUrl}
@@ -676,13 +774,55 @@ export default function App() {
                     onDirectMessage={dmTo}
                     onLeaveChat={leaveActiveChat}
                     onSeen={markSeen}
+                    onAddMembers={() => setShowAddMembers(true)}
                     onRefreshPeerKey={async () => {
                         if (!activeChat || activeChat.isGroup || !activeChat.opponentId) return;
                         await forceRefreshRecipientKeys(activeChat.opponentId, authFetch);
                         alert("Ключ контакта перечитан. Отправьте новое сообщение и проверьте расшифровку.");
                     }}
+                    onRemoveMember={async (userId: number) => {
+                        if (!active) return;
+                        await api.removeChatMember(active, userId);
+                        // обновим список участников после удаления
+                        setMembers(await api.getChatMembers(active));
+                    }}
+                    onChangeChatAvatar={async (file) => {
+                        if (!active) return;
+
+                        const API_BASE = (import.meta as any)?.env?.VITE_API_BASE ?? "/api";
+                        const form = new FormData();
+                        form.append("file", file);     // наиболее частый кейс
+                        form.append("avatar", file);   // на случай, если бэкенд ждёт "avatar"
+
+                        let res: Response;
+                        try {
+                            res = await authFetch(`${API_BASE}/chats/${active}/avatar`, {
+                                method: "POST",            // если у тебя на бэке PUT — тут поменяй
+                                body: form,
+                            });
+                        } catch (e) {
+                            console.error(e);
+                            alert("Не удалось связаться с сервером" +
+                                "");
+                            return;
+                        }
+
+                        if (!res.ok) {
+                            const txt = await res.text().catch(() => "");
+                            alert(txt || `Не удалось обновить аватар (HTTP ${res.status})`);
+                            return;
+                        }
+
+
+                        const { avatarUrl } = await res.json();
+                        setChats(cs => cs.map(c => c.id === active ? ({ ...c, avatarUrl }) : c));
+                    }}
+
+
+                    onBack={isNarrow ? () => setActive(null) : undefined}
                 />
             </div>
         </div>
+
     );
 }

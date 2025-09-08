@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Server.Hubs;
 using Server.Services;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 using System.Security.Claims;
 
 namespace Server.Controllers;
@@ -18,10 +21,12 @@ public class ChatsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IHubContext<ChatHub> _hub;
     private readonly IPresenceService _presence;
+    private readonly IWebHostEnvironment _env;
 
-    public ChatsController(AppDbContext db, IHubContext<ChatHub> hub, IPresenceService presence)
+    public ChatsController(AppDbContext db, IHubContext<ChatHub> hub, IPresenceService presence, IWebHostEnvironment env)
     {
         _db = db; _hub = hub; _presence = presence;
+        _env = env;
     }
 
     [Authorize]
@@ -123,8 +128,8 @@ public class ChatsController : ControllerBase
                 title = meUser.Name ?? $"User#{meUser.Id}",
                 avatarUrl = meUser.AvatarUrl,
                 isGroup = false,
-                opponentId = me,                    // ← важно для presence
-                isOnline = meUser.IsOnline,         // снимок
+                opponentId = me,                    
+                isOnline = meUser.IsOnline,         
                 lastSeenUtc = meUser.LastSeenUtc,
                 lastText = (string?)null,
                 lastUtc = (DateTime?)null,
@@ -186,7 +191,7 @@ public record CreateChatDto(string name, List<int> memberIds, string? avatarUrl)
                 name = x.User!.Name,
                 avatarUrl = x.User.AvatarUrl,
                 isAdmin = x.IsAdmin,
-                lastSeenMessageId = x.LastSeenMessageId        // ← добавили
+                lastSeenMessageId = x.LastSeenMessageId      
             })
             .ToListAsync();
 
@@ -234,6 +239,136 @@ public record CreateChatDto(string name, List<int> memberIds, string? avatarUrl)
 
         return NoContent();
     }
+
+    [Authorize]
+    [HttpPost("{chatId:int}/avatar")]
+    public async Task<IActionResult> UploadChatAvatar(int chatId, [FromForm] IFormFile file)
+    {
+        if (file == null || file.Length == 0) return BadRequest("Файл не передан");
+
+        var uid = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        var cu = await _db.ChatUsers.AsNoTracking().FirstOrDefaultAsync(x => x.ChatId == chatId && x.UserId == uid);
+        if (cu == null) return Forbid();
+
+        var chat = await _db.Chats.FirstOrDefaultAsync(c => c.Id == chatId);
+        if (chat == null || !chat.IsGroup) return NotFound();
+
+        // базовая «прожарка» изображения
+        using var image = await Image.LoadAsync(file.OpenReadStream());
+        image.Mutate(x => x.Resize(new ResizeOptions { Mode = ResizeMode.Max, Size = new Size(512, 512) }));
+
+        Directory.CreateDirectory(Path.Combine(_env.WebRootPath, "avatars"));
+        var fileName = $"chat_{chatId}_{Guid.NewGuid():N}.jpg";
+        var path = Path.Combine(_env.WebRootPath, "avatars", fileName);
+        await image.SaveAsJpegAsync(path, new JpegEncoder { Quality = 85 });
+
+        chat.AvatarUrl = $"/avatars/{fileName}";
+        await _db.SaveChangesAsync();
+
+        // оповестим участников, чтобы у всех обновилось сразу
+        await _hub.Clients.Group($"chat:{chatId}").SendAsync("ChatUpdated", new { id = chatId, avatarUrl = chat.AvatarUrl });
+
+        return Ok(new { avatarUrl = chat.AvatarUrl });
+    }
+
+    public record AddMembersDto(List<int> userIds);
+
+    [HttpPost("{chatId:int}/members")]
+    public async Task<IActionResult> AddMembers(int chatId, [FromBody] AddMembersDto dto)
+    {
+        var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        var chat = await _db.Chats
+            .Include(c => c.ChatUsers)
+            .FirstOrDefaultAsync(c => c.Id == chatId && c.IsGroup);
+        if (chat is null) return NotFound();
+
+        var meCU = chat.ChatUsers.FirstOrDefault(x => x.UserId == me);
+        if (meCU is null) return Forbid();
+
+
+        var toAdd = dto.userIds
+            .Distinct()
+            .Where(uid => uid != me && !chat.ChatUsers.Any(cu => cu.UserId == uid))
+            .ToList();
+        if (toAdd.Count == 0) return Ok(new { added = 0 });
+
+        var maxId = await _db.Messages.Where(m => m.ChatId == chatId)
+                                      .MaxAsync(m => (int?)m.Id) ?? 0;
+
+        foreach (var uid in toAdd)
+            _db.ChatUsers.Add(new ChatUser
+            {
+                ChatId = chatId,
+                UserId = uid,
+                IsAdmin = false,
+                Created = DateTime.UtcNow,
+                LastSeenMessageId = maxId
+            });
+
+        await _db.SaveChangesAsync();
+
+        // подключим активные соединения новых участников к группе SignalR
+        foreach (var uid in toAdd)
+            foreach (var conn in _presence.GetConnections(uid))
+                await _hub.Groups.AddToGroupAsync(conn, $"chat:{chatId}");
+
+        // чтобы чат появился у приглашённых в списке
+        foreach (var uid in toAdd)
+            await _hub.Clients.Group($"user:{uid}").SendAsync("ChatCreated", new
+            {
+                id = chatId,
+                title = chat.Name,
+                avatarUrl = chat.AvatarUrl,
+                isGroup = true,
+                opponentId = (int?)null,
+                isOnline = (bool?)null,
+                lastSeenUtc = (DateTime?)null,
+                lastText = (string?)null,
+                lastUtc = (DateTime?)null,
+                lastSenderId = (int?)null,
+                unreadCount = 0
+            });
+
+        // уведомим текущих участников — можно обновить список участников на клиенте
+        await _hub.Clients.Group($"chat:{chatId}")
+            .SendAsync("MembersAdded", new { chatId, userIds = toAdd });
+
+        return Ok(new { added = toAdd.Count });
+    }
+
+
+    [HttpDelete("{chatId:int}/members/{userId:int}")]
+    public async Task<IActionResult> RemoveMember(int chatId, int userId)
+    {
+        var meId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        var chat = await _db.Chats
+            .Include(c => c.ChatUsers)
+            .FirstOrDefaultAsync(c => c.Id == chatId && c.IsGroup);
+        if (chat == null) return NotFound();
+
+        var me = chat.ChatUsers.FirstOrDefault(m => m.UserId == meId);
+        if (me == null) return Forbid();
+        if (!me.IsAdmin) return Forbid();                    
+
+        var target = chat.ChatUsers.FirstOrDefault(m => m.UserId == userId);
+        if (target == null) return NotFound();
+        if (target.IsAdmin) return StatusCode(403, "Нельзя исключить администратора");
+
+        _db.ChatUsers.Remove(target);
+        await _db.SaveChangesAsync();
+
+        await _hub.Clients.Group($"chat:{chatId}")          
+            .SendAsync("MemberRemoved", new { chatId, userId });
+
+        return Ok(new { removed = userId });
+    }
+
+
+
+
 
 
 }

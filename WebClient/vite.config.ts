@@ -6,20 +6,10 @@ export default defineConfig({
     server: {
         port: 5173,
         proxy: {
-            // REST
-            "/api": {
-                target: "http://localhost:5157",
-                changeOrigin: true,
-            },
-            "^/(chatHub|chathub)": {
-                target: "http://localhost:5157",
-                changeOrigin: true,
-                ws: true,
-            },
-            "/avatars": {
-                target: "http://localhost:5157",
-                changeOrigin: true,
-            },
+            "/api":      { target: "http://localhost:5157", changeOrigin: true },
+            "/chatHub":  { target: "http://localhost:5157", ws: true, changeOrigin: true },
+            "/chathub":  { target: "http://localhost:5157", ws: true, changeOrigin: true }, // на всякий случай регистр
+            "/avatars":  { target: "http://localhost:5157", changeOrigin: true },
         },
     },
 });

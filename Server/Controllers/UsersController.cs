@@ -65,7 +65,7 @@ public class UsersController : ControllerBase
         if (file.Length > MaxAvatarSize) return BadRequest("Файл слишком большой");
 
         // «прожарка» через ImageSharp (срежет EXIF, приведёт к JPEG)
-        using var image = await Image.LoadAsync(file.OpenReadStream()); // упадёт, если это не картинка
+        using var image = await Image.LoadAsync(file.OpenReadStream()); 
         image.Mutate(x => x.Resize(new ResizeOptions { Mode = ResizeMode.Max, Size = new Size(512, 512) }));
 
         Directory.CreateDirectory(Path.Combine(_env.WebRootPath, "avatars"));
@@ -109,21 +109,36 @@ public class UsersController : ControllerBase
         return Ok(users);
     }
 
-    [HttpGet("{id:int}/members")]
-    public async Task<IActionResult> GetMembers(int id)
+    public record MemberDto(
+        int Id,
+        string Name,
+        string? AvatarUrl,
+        bool IsAdmin,
+        DateTime? LastSeenUtc,
+        bool IsOnline
+    );
+
+    [HttpGet("{chatId:int}/members")]
+    public async Task<ActionResult<IEnumerable<MemberDto>>> GetMembers(int chatId)
     {
+        var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var canSee = await _db.Chats.AnyAsync(c => c.Id == chatId && c.ChatUsers.Any(x => x.UserId == me));
+        if (!canSee) return Forbid();
+
+        var now = DateTime.UtcNow;
         var users = await _db.ChatUsers
-            .AsNoTracking()
-            .Where(x => x.ChatId == id)
-            .Select(x => new {
-                id = x.UserId,
-                name = x.User!.Name,
-                avatarUrl = x.User.AvatarUrl,    
-                lastSeenMessageId = x.LastSeenMessageId
-            })
+            .Where(cu => cu.ChatId == chatId)
+            .Select(cu => new MemberDto(
+                cu.UserId,
+                cu.User.Name,
+                cu.User.AvatarUrl,
+                cu.IsAdmin,
+                cu.User.LastSeenUtc,              
+                cu.User.LastSeenUtc != null && now - cu.User.LastSeenUtc <= TimeSpan.FromMinutes(2)
+            ))
             .ToListAsync();
 
-        return Ok(users);
+        return users;
     }
 
 

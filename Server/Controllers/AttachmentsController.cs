@@ -102,41 +102,6 @@ namespace Server.Controllers
             string Rel(string abs) => abs.Replace(_env.ContentRootPath, "").Replace("\\", "/");
         }
 
-        [Authorize]
-        [HttpGet("{id:int}")]
-        public async Task<IActionResult> GetFile(int id)
-        {
-            var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-
-            var att = await _db.Attachments
-                .Where(a => a.Id == id)
-                .Select(a => new { a.StoragePath, a.MimeType })
-                .SingleOrDefaultAsync();
-
-            if (att == null) return NotFound();
-
-
-            var path = "/api/attachments/" + id;
-
-            var inChat = await _db.Messages.AnyAsync(m =>
-                m.Attachments.Any(ma => ma.Id == id) &&
-                m.Chat.ChatUsers.Any(cu => cu.UserId == me));
-
-            var isUserAvatar = await _db.Users.AnyAsync(u => u.AvatarUrl == path);
-
-            var isChatAvatarIMember = await _db.Chats.AnyAsync(c =>
-                c.AvatarUrl == path &&
-                c.ChatUsers.Any(cu => cu.UserId == me));
-
-
-            var allowed = inChat || isUserAvatar || isChatAvatarIMember;
-            if (!allowed) return Forbid();
-
-            var abs = Path.Combine(_env.ContentRootPath, att.StoragePath.TrimStart('/'));
-            return PhysicalFile(abs, att.MimeType, enableRangeProcessing: true);
-        }
-
-
 
         private async Task TranscodeVideoAsync(int attId, string srcPath, string root)
         {
@@ -199,15 +164,134 @@ namespace Server.Controllers
             if (p.ExitCode != 0) throw new Exception("ffmpeg failed");
         }
 
-        [HttpGet("{id}/hls")]
+        [Authorize]
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetFile(int id)
+        {
+            var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+            var att = await _db.Attachments
+                .Where(a => a.Id == id)
+                .Select(a => new { a.StoragePath, a.MimeType })
+                .SingleOrDefaultAsync();
+
+            if (att == null) return NotFound();
+
+            var pathApi = "/api/attachments/" + id;
+
+            var allowed =
+                await _db.Messages.AnyAsync(m =>
+                    m.Attachments.Any(ma => ma.Id == id) &&
+                    m.Chat.ChatUsers.Any(cu => cu.UserId == me))
+                || await _db.Users.AnyAsync(u => u.AvatarUrl == pathApi)
+                || await _db.Chats.AnyAsync(c => c.AvatarUrl == pathApi &&
+                                                 c.ChatUsers.Any(cu => cu.UserId == me));
+
+            if (!allowed) return Forbid();
+
+            var abs = Path.Combine(_env.ContentRootPath, att.StoragePath.TrimStart('/'));
+            if (!System.IO.File.Exists(abs)) return NotFound();  // полезно для диагностики
+
+            return PhysicalFile(abs, att.MimeType, enableRangeProcessing: true);
+        }
+
+        [Authorize]
+        [HttpGet("{id:int}/content")]
+        public Task<IActionResult> GetContent(int id) => GetFile(id); 
+
+        [Authorize]
+        [HttpGet("{id:int}/thumb")]
+        public async Task<IActionResult> GetThumb(int id)
+        {
+            var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+            var inChat = await _db.Messages.AnyAsync(m =>
+                m.Attachments.Any(ma => ma.Id == id) &&
+                m.Chat.ChatUsers.Any(cu => cu.UserId == me));
+
+            var path = "/api/attachments/" + id;
+            var isUserAvatar = await _db.Users.AnyAsync(u => u.AvatarUrl == path);
+            var isChatAvatarIMember = await _db.Chats.AnyAsync(c =>
+                c.AvatarUrl == path && c.ChatUsers.Any(cu => cu.UserId == me));
+
+            if (!(inChat || isUserAvatar || isChatAvatarIMember)) return Forbid();
+
+            var v = await _db.AttachmentVariants
+                .Where(x => x.AttachmentId == id && x.Type == "thumb")
+                .Select(x => x.StoragePath)
+                .FirstOrDefaultAsync();
+            if (v == null) return NotFound();
+
+            var abs = Path.Combine(_env.ContentRootPath, v.TrimStart('/'));
+            return PhysicalFile(abs, "image/jpeg");
+        }
+
+
+
+        [Authorize]
+        [HttpGet("{id:int}/hls")]
         public async Task<IActionResult> GetHls(int id)
         {
+            var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+            var pathApi = "/api/attachments/" + id;
+            var allowed =
+                await _db.Messages.AnyAsync(m =>
+                    m.Attachments.Any(ma => ma.Id == id) &&
+                    m.Chat.ChatUsers.Any(cu => cu.UserId == me))
+                || await _db.Users.AnyAsync(u => u.AvatarUrl == pathApi)
+                || await _db.Chats.AnyAsync(c => c.AvatarUrl == pathApi &&
+                                                 c.ChatUsers.Any(cu => cu.UserId == me));
+            if (!allowed) return Forbid();
+
             var v = await _db.AttachmentVariants
                 .Where(x => x.AttachmentId == id && x.Type == "hls")
                 .FirstOrDefaultAsync();
             if (v == null) return NotFound();
-            return PhysicalFile(Path.Combine(_env.ContentRootPath, v.StoragePath.TrimStart('/')),
-                                "application/vnd.apple.mpegurl");
+
+            var abs = Path.Combine(_env.ContentRootPath, v.StoragePath.TrimStart('/'));
+            return PhysicalFile(abs, "application/vnd.apple.mpegurl");
         }
+
+
+        [HttpGet("{id:int}/hls/{*asset}")]
+        public async Task<IActionResult> GetHlsAsset(int id, string? asset)
+        {
+            if (asset?.Contains("..") == true) return BadRequest();
+
+            var me = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+            var pathForCompare = "/api/attachments/" + id;
+            var allowed =
+                await _db.Messages.AnyAsync(m =>
+                    m.Attachments.Any(ma => ma.Id == id) &&
+                    m.Chat.ChatUsers.Any(cu => cu.UserId == me))
+                || await _db.Users.AnyAsync(u => u.AvatarUrl == pathForCompare)
+                || await _db.Chats.AnyAsync(c => c.AvatarUrl == pathForCompare &&
+                                                 c.ChatUsers.Any(cu => cu.UserId == me));
+            if (!allowed) return Forbid();
+
+            var v = await _db.AttachmentVariants
+                .Where(x => x.AttachmentId == id && x.Type == "hls")
+                .Select(x => x.StoragePath)
+                .SingleOrDefaultAsync();
+            if (v == null) return NotFound();
+
+            var baseDir = Path.GetDirectoryName(Path.Combine(_env.ContentRootPath, v.TrimStart('/')))!;
+            var file = string.IsNullOrEmpty(asset) ? "index.m3u8" : asset;
+            var abs = Path.GetFullPath(Path.Combine(baseDir, file));
+
+            // защита от выхода из папки
+            if (!abs.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase)) return Forbid();
+            if (!System.IO.File.Exists(abs)) return NotFound();
+
+            var mime = abs.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
+                ? "application/vnd.apple.mpegurl"
+                : "video/MP2T";
+
+            return PhysicalFile(abs, mime);
+        }
+
+
     }
 }

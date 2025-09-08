@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchAndDecryptAttachment, fetchAndDecryptThumb, getAttachmentLocalMeta } from "../../lib/api";
+import {fetchAndDecryptAttachment, fetchAndDecryptThumb, getAttachmentLocalMeta} from "../../lib/api";
 
 type Att = { id: number | string; url?: string; contentType?: string; fileName?: string; sizeBytes?: number; };
 
@@ -10,18 +10,23 @@ export function Attachment({ a }: { a: Att }) {
 
     const idNum = Number(a.id);
     const local = getAttachmentLocalMeta(idNum);
+
     const mime = (local?.mime || a.contentType || "").toLowerCase();
-    const isImage = mime.startsWith("image/");
+    const name = (a.fileName || "").toLowerCase();
+    const looksLikeImageByExt = /\.(png|jpe?g|gif|webp|heic|heif|bmp|svg)$/.test(name);
+    const isImage = mime.startsWith("image/") || looksLikeImageByExt;
 
     useEffect(() => {
         let revoke: string | null = null;
         (async () => {
-            if (!isImage || !Number.isFinite(idNum)) return;
+
+                      if (!isImage || !Number.isFinite(idNum)) return;
             try {
                 let blob: Blob | null = null;
                 try { blob = await fetchAndDecryptThumb(idNum); } catch {}
                 if (!blob) blob = await fetchAndDecryptAttachment(idNum);
-                const u = URL.createObjectURL(blob);
+
+                           const u = URL.createObjectURL(blob);
                 setThumbUrl(u); revoke = u;
             } catch {}
         })();

@@ -1,7 +1,15 @@
+import {authFetch, cacheAttSecrets} from "./api.ts";
+
 
 let CURRENT_UID: number | null = null;
 export function setActiveE2EEUser(userId: number) { CURRENT_UID = userId; }
 
+export function initActiveUserFromLocalStorage() {
+    const uid = Number(localStorage.getItem("userId"));
+    if (Number.isFinite(uid)) setActiveE2EEUser(uid);
+}
+
+const E2EE_GROUP_PREFIX = "E2EEG1:";
 // LS-неймспейсы
 const LS_BASE = {
     privEcdh: "priv:ecdh:jwk",
@@ -17,7 +25,25 @@ function NS(key: keyof typeof LS_BASE) {
     return `e2ee:u:${uid}:${LS_BASE[key]}`;
 }
 
+const E2EE_DUAL_PREFIX = "E2EED1:";
+
+type DualV1 = {
+    v: "e2ee:dual1";
+    to: string;
+    me: string;
+};
+
+function unpackDual(s: string): DualV1 | null {
+    if (!s?.startsWith(E2EE_DUAL_PREFIX)) return null;
+    try { return JSON.parse(atob(s.slice(E2EE_DUAL_PREFIX.length))); }
+    catch { return null; }
+}
+
 export type PublicKeys = { ecdhPubJwk: JsonWebKey; signPubJwk: JsonWebKey };
+type Cached = PublicKeys | null;
+
+type GroupEnvelope = { uid: number; box: string };
+type GroupV1 = { v: "e2ee:group1"; env: GroupEnvelope[] };
 
 function K_privEcdh() { return NS("privEcdh"); }
 function K_privSign() { return NS("privSign"); }
@@ -27,6 +53,11 @@ function K_pubCached(){ return NS("pubCached"); }
 function K_meUploaded(){ return NS("meKeysUploaded"); }
 function K_tofu()     { return NS("tofuFingerprints"); }
 const subtle = crypto.subtle;
+
+function unpackGroup(s: string): GroupV1 | null {
+    if (!s?.startsWith(E2EE_GROUP_PREFIX)) return null;
+    try { return JSON.parse(atob(s.slice(E2EE_GROUP_PREFIX.length))); } catch { return null; }
+}
 
 // b64 utils
 export function b64(a: ArrayBuffer): string { return btoa(String.fromCharCode(...new Uint8Array(a))); }
@@ -59,6 +90,25 @@ async function importJwk(
 /* =========================
    Формат шифротекста и E2EE функции
    ========================= */
+
+export async function encryptForGroup(memberIds: number[], plaintext: string, fetchAuth: typeof fetch) {
+    const ids = Array.from(new Set(memberIds.filter(Number.isFinite))).sort((a,b)=>a-b);
+    const env: { uid: number; box: string }[] = [];
+    const missing: number[] = [];
+
+    for (const uid of ids) {
+        try {
+            const box = await encryptForUser(uid, plaintext, fetchAuth);
+            env.push({ uid, box });
+        } catch { missing.push(uid); }
+    }
+
+    if (!env.length) throw new Error("No recipients with keys");
+    if (missing.length) throw new Error(`У этих пользователей нет ключей: ${missing.join(", ")}`);
+    return "E2EEG1:" + btoa(JSON.stringify({ v: "e2ee:group1", env }));
+}
+
+
 
 export type CipherV1 = {
     v: "e2ee:v1";
@@ -116,6 +166,29 @@ export async function encryptForUser(
     return "E2EE1:" + btoa(JSON.stringify(out));
 
 }
+
+async function tryDecryptGroup(
+    senderUserId: number,
+    wrapped: string,
+    fetchAuth: typeof fetch
+): Promise<string | null> {
+    const g = unpackGroup(wrapped);
+    if (!g) return null;
+
+    const myId = Number(localStorage.getItem("userId"));
+    // сначала ищем свой конверт по uid
+    const mine = g.env.find(e => e.uid === myId);
+    const candidates = mine ? [mine, ...g.env.filter(e => e !== mine)] : g.env;
+
+    for (const e of candidates) {
+        try {
+            const pt = await tryDecryptFrom(senderUserId, e.box, fetchAuth);
+            if (pt) return pt;
+        } catch {/* пробуем следующий */}
+    }
+    return null;
+}
+
 // Попытка расшифровать входящее сообщение от senderUserId
 export async function tryDecryptFrom(
     senderUserId: number,
@@ -164,6 +237,68 @@ export async function tryDecryptFrom(
     return dec(ptBuf);
 }
 
+// было: export async function maybeDecryptMessage(senderId: number, text: string)
+export async function maybeDecryptMessage(senderId: number, text: string): Promise<string> {
+    if (!text || (!text.startsWith("E2EE1:") && !text.startsWith("E2EED1:") && !text.startsWith("E2EEG1:"))) {
+        return text;
+    }
+
+    try {
+        // 1) группа
+        if (text.startsWith("E2EEG1:")) {
+            const pt = await tryDecryptGroup(senderId, text, authFetch);
+            if (!pt) return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+            if (pt.startsWith("{")) {
+                try {
+                    const obj = JSON.parse(pt);
+                    if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att);
+                    if (typeof obj?.t === "string") return obj.t;
+                } catch {/* ignore */}
+            }
+            return pt;
+        }
+
+        // 2) dual 1:1 (как было)
+        const dual = unpackDual(text);
+        if (dual) {
+            const myId = Number(localStorage.getItem("userId"));
+            const halves = senderId === myId ? [dual.me, dual.to] : [dual.to, dual.me];
+            for (const wrapped of halves) {
+                try {
+                    const pt = await tryDecryptFrom(senderId, wrapped, authFetch);
+                    if (!pt) continue;
+                    if (pt.startsWith("{")) {
+                        try {
+                            const obj = JSON.parse(pt);
+                            if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att);
+                            if (typeof obj?.t === "string") return obj.t;
+                        } catch {}
+                    }
+                    return pt;
+                } catch {}
+            }
+            return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+        }
+
+        // 3) обычный E2EE1 (как было)
+        const pt = await tryDecryptFrom(senderId, text, authFetch);
+        if (!pt) return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+        if (pt.startsWith("{")) {
+            try {
+                const obj = JSON.parse(pt);
+                if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att);
+                if (typeof obj?.t === "string") return obj.t;
+            } catch {}
+        }
+        return pt;
+
+    } catch (e) {
+        console.warn("E2EE decrypt failed", e);
+        return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+    }
+}
+
+
 /* =========================
    Базовые AES-GCM утилиты
    ========================= */
@@ -191,6 +326,8 @@ export async function decrypt(key: CryptoKey, iv_b64: string, ct_b64: string, aa
 /* =========================
    Управление ключами пользователя
    ========================= */
+
+
 
 export async function ensureIdentityKeysUploaded(fetchAuth: typeof fetch): Promise<void> {
     let privEcdh = localStorage.getItem(K_privEcdh());
@@ -221,7 +358,7 @@ export async function ensureIdentityKeysUploaded(fetchAuth: typeof fetch): Promi
     }
 
     if (!localStorage.getItem(K_meUploaded())) {
-        const res = await fetchAuth("/api/users/me/keys", {
+        const res = await fetchAuth("/users/me/keys", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ecdhPublicJwk: pubEcdh!, signPublicJwk: pubSign! })
         });
@@ -239,14 +376,27 @@ export async function initAfterLogin(fetchAuth: typeof fetch, userId?: number) {
 export async function selfTestE2EE(fetchAuth: typeof fetch) {
     try {
         const myId = Number(localStorage.getItem("userId"));
+
+        // сбросить возможный устаревший кэш моего pubkey
+        try {
+            const k = K_pubCached();
+            const cache = JSON.parse(localStorage.getItem(k) || "{}");
+            if (cache && cache[String(myId)]) {
+                delete cache[String(myId)];
+                localStorage.setItem(k, JSON.stringify(cache));
+            }
+        } catch {}
+
         const msg = "selftest:" + Math.random().toString(36).slice(2, 8);
-        const c = await encryptForUser(myId, msg, fetchAuth);
+        const c = await encryptForUser(myId, msg, fetchAuth);     // теперь шьёт на актуальный ключ
         const pt = await tryDecryptFrom(myId, c, fetchAuth);
         if (pt !== msg) throw new Error("self-test mismatch");
+        console.info("E2EE self-test OK");
     } catch (e) {
         console.error("E2EE self-test failed:", e);
     }
 }
+
 
 /* =========================
    TOFU / ключи контактов
@@ -300,6 +450,7 @@ export function forgetPinnedFingerprint(userId: number) {
 }
 
 // Получение ключей контакта с кэшем и возможностью принудительного обновления
+
 export async function getRecipientPublicKeys(
     userId: number,
     fetchAuth: typeof fetch,
@@ -307,26 +458,45 @@ export async function getRecipientPublicKeys(
 ): Promise<PublicKeys> {
     const force = !!opts?.force;
     const kCache = K_pubCached();
-    const cache: Record<string, PublicKeys> = (() => { try { return JSON.parse(localStorage.getItem(kCache) || "{}"); } catch { return {}; } })();
+    const cache: Record<string, Cached> = (() => {
+        try { return JSON.parse(localStorage.getItem(kCache) || "{}"); } catch { return {}; }
+    })();
 
-    if (!force && cache[userId]) {
-        await pinOrUpdateTofu(userId, cache[userId].ecdhPubJwk, cache[userId].signPubJwk);
-        return cache[userId];
+    // если уже знаем, что ключей нет — не дергаем сервер каждый раз
+    if (!force && Object.prototype.hasOwnProperty.call(cache, userId)) {
+        const hit = cache[userId];
+        if (hit === null) throw new Error("No recipient keys");
+        await pinOrUpdateTofu(userId, hit.ecdhPubJwk, hit.signPubJwk);
+        return hit;
     }
 
-    const res = await fetchAuth(`/api/users/${userId}/keys`);
-    if (!res.ok) throw new Error("No recipient keys");
-    const dto = await res.json();
+    let res = await fetchAuth(`/users/${userId}/keys`);
 
+    // для себя — автозагрузка и повтор
+    if (res.status === 404 && userId === Number(localStorage.getItem("userId"))) {
+        await ensureIdentityKeysUploaded(fetchAuth);
+        res = await fetchAuth(`/users/${userId}/keys`);
+    }
+
+    if (res.status === 404) {
+        cache[userId] = null;                        // негативный кэш
+        localStorage.setItem(kCache, JSON.stringify(cache));
+        throw new Error("No recipient keys");
+    }
+
+    if (!res.ok) throw new Error("Keys fetch failed");
+
+    const dto = await res.json();
     const ecdhPubJwk = JSON.parse(dto.ecdhPublicJwk);
     const signPubJwk = JSON.parse(dto.signPublicJwk);
+    const value = { ecdhPubJwk, signPubJwk } as PublicKeys;
 
-    await pinOrUpdateTofu(userId, ecdhPubJwk, signPubJwk);
-
-    cache[userId] = { ecdhPubJwk, signPubJwk };
+    cache[userId] = value;
     localStorage.setItem(kCache, JSON.stringify(cache));
-    return cache[userId];
+    await pinOrUpdateTofu(userId, ecdhPubJwk, signPubJwk);
+    return value;
 }
+
 
 /* =========================
    Ротация/сброс

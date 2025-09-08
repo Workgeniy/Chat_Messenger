@@ -2,7 +2,7 @@ import {
     initAfterLogin,
     encryptForUser,
     tryDecryptFrom,
-    selfTestE2EE,
+    selfTestE2EE, encryptForGroup,
 } from "./crypto";
 
 export type Chat = {
@@ -62,6 +62,98 @@ export type Participant = {
 
 export type StartChatResp = { id: number } | { chatId: number } | Chat;
 
+// ====== Групповой формат и расшифровка ======
+const E2EE_GROUP_PREFIX = "E2EEG1:";
+type GroupEnvelope = { uid: number; box: string };
+type GroupV1 = { v: "e2ee:group1"; env: GroupEnvelope[] };
+
+function unpackGroup(s: string): GroupV1 | null {
+    if (!s?.startsWith(E2EE_GROUP_PREFIX)) return null;
+    try { return JSON.parse(atob(s.slice(E2EE_GROUP_PREFIX.length))); } catch { return null; }
+}
+
+
+async function tryDecryptGroup(
+    senderUserId: number,
+    wrapped: string
+): Promise<string | null> {
+    const g = unpackGroup(wrapped);
+    if (!g) return null;
+
+    const myId = Number(localStorage.getItem("userId"));
+    const mine = g.env.find(e => e.uid === myId);
+    const candidates = mine ? [mine, ...g.env.filter(e => e !== mine)] : g.env;
+
+    for (const e of candidates) {
+        try {
+            const pt = await tryDecryptFrom(senderUserId, e.box, authFetch);
+            if (pt) return pt;
+        } catch { /* пробуем следующий */ }
+    }
+    return null;
+}
+
+// Главная функция: расшифровать или вернуть плейнтекст
+export async function maybeDecryptMessage(senderId: number, text: string): Promise<string> {
+    if (!text || (!text.startsWith("E2EE1:") && !text.startsWith("E2EED1:") && !text.startsWith("E2EEG1:"))) {
+        return text;
+    }
+
+    try {
+        // 1) Группа
+        if (text.startsWith(E2EE_GROUP_PREFIX)) {
+            const pt = await tryDecryptGroup(senderId, text);
+            if (!pt) return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+            if (pt.startsWith("{")) {
+                try {
+                    const obj = JSON.parse(pt);
+                    if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att);
+                    if (typeof obj?.t === "string") return obj.t;
+                } catch {}
+            }
+            return pt;
+        }
+
+        // 2) Dual 1:1
+        const dual = unpackDual(text);
+        if (dual) {
+            const myId = Number(localStorage.getItem("userId"));
+            const halves = senderId === myId ? [dual.me, dual.to] : [dual.to, dual.me];
+            for (const wrapped of halves) {
+                try {
+                    const pt = await tryDecryptFrom(senderId, wrapped, authFetch);
+                    if (!pt) continue;
+                    if (pt.startsWith("{")) {
+                        try {
+                            const obj = JSON.parse(pt);
+                            if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att);
+                            if (typeof obj?.t === "string") return obj.t;
+                        } catch {}
+                    }
+                    return pt;
+                } catch {}
+            }
+            return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+        }
+
+        // 3) Обычный E2EE1
+        const pt = await tryDecryptFrom(senderId, text, authFetch);
+        if (!pt) return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+        if (pt.startsWith("{")) {
+            try {
+                const obj = JSON.parse(pt);
+                if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att);
+                if (typeof obj?.t === "string") return obj.t;
+            } catch {}
+        }
+        return pt;
+
+    } catch (e) {
+        console.warn("E2EE decrypt failed", e);
+        return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+    }
+}
+
 export async function editMessageE2EE(messageId: number, newText: string, opponentUserId: number) {
     let payload = newText;
     try {
@@ -114,7 +206,7 @@ function getSecretsFor(ids: number[] | undefined): AttSecret[] {
 export function getAttachmentLocalMeta(id: number): { mime?: string; hasThumb?: boolean } | null {
     const s = getSecretById(id);
     if (!s) return null;
-    return { mime: s.mime, hasThumb: !!s.thumbId && !!s.thumbIv };
+    return { mime: s.mime, hasThumb: !!s.mime && s.mime.startsWith("image/") };
 }
 
 export type StoredAccount = {
@@ -129,41 +221,53 @@ export type MeDto = { id: number; name: string; email: string; avatarUrl?: strin
 export type LoginResp = { token: string; userId: number; login: string; name: string; avatarUrl?: string | null };
 export type RegisterResp = { token: string; userId: number; login: string; name: string; email?: string | null; avatarUrl?: string | null };
 
-export async function getChatMembers(chatId: number) {
-    const r = await fetch(`/api/chats/${chatId}/members`, { credentials: "include" });
-    if (!r.ok) throw new Error("getMembers failed");
-    return r.json();
-}
-
-export async function markSeen(chatId: number, upToMessageId: number) {
-    const r = await fetch(`/api/chats/${chatId}/seen`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ upToMessageId })
-    });
-    if (!r.ok) throw new Error("markSeen failed");
-}
 
 // ——— База ———
-const API = import.meta.env.VITE_API_BASE || "/api";
+const API = import.meta.env.VITE_API_BASE ?? "/api";
 
 let token: string | null = null;
 export function setToken(t: string | null) { token = t; }
 
+
+
 export const authFetch: typeof fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
-    if (!(init.body instanceof FormData)) headers.set("Content-Type", headers.get("Content-Type") || "application/json");
-    const bearer = token || localStorage.getItem("token");
-    if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
-    return fetch(input as any, { ...init, headers, credentials: "include" });
+
+    // Content-Type только для НЕ-FormData
+    if (!(init.body instanceof FormData)) {
+        if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    }
+
+    const bearer = token || localStorage.getItem('token');
+    if (bearer) headers.set('Authorization', `Bearer ${bearer}`);
+
+    let url: RequestInfo | URL = input;
+
+    if (typeof input === 'string') {
+        const s = input;
+        const isAbsolute = /^(https?:)?\/\//i.test(s);
+        const apiBase = API.replace(/\/$/, '');
+
+        if (!isAbsolute) {
+            if (s.startsWith(apiBase)) {
+                url = s;                        // уже с /api — не трогаем
+            } else if (s.startsWith('/')) {
+                url = apiBase + s;              // /xxx  -> /api/xxx
+            } else {
+                url = `${apiBase}/${s}`;        // xxx   -> /api/xxx
+            }
+        }
+    }
+
+    return fetch(url, { ...init, headers, credentials: 'include' });
 };
 
 async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    const res = await fetch(`${API}${path}`, { ...init, headers });
+    const bearer = token || localStorage.getItem("token");
+    if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
+    const res = await fetch(`${API}${path}`, { ...init, headers, credentials: "include" });
     if (!res.ok) throw new Error(await res.text());
     return res.status === 204 ? (undefined as any) : res.json();
 }
@@ -180,6 +284,12 @@ export const api = {
         return res.json();
     },
 
+    // uploadChatAvatar: (chatId: number, file: File) => {
+    //     const form = new FormData();
+    //     form.append("file", file);
+    //     return http<{ avatarUrl: string }>(`/chats/${chatId}/avatar`, { method: "POST", body: form });
+    // },
+
     //  регистрация с логином
     async register(login: string, name: string, email: string | null, password: string): Promise<RegisterResp> {
         const res = await fetch(`${API}/auth/register`, {
@@ -188,6 +298,51 @@ export const api = {
         });
         if (!res.ok) throw new Error(await res.text());
         return res.json();
+    },
+
+    async addChatMembers(chatId: number, userIds: number[]) {
+        const bodies = [
+            JSON.stringify({ userIds }),
+            JSON.stringify({ memberIds: userIds }),
+            JSON.stringify({ ids: userIds }),
+        ];
+        const headers = { 'Content-Type': 'application/json' as const };
+
+        for (const body of bodies) {
+            const r = await authFetch(`/chats/${chatId}/members`, { method: 'POST', headers, body });
+            if (r.ok) {
+                // сервер может вернуть 204 No Content
+                try { return await r.json(); } catch { return; }
+            }
+            if (r.status !== 404 && r.status !== 405) {
+                // есть ответ от сервера, но не ОК — покажем его текст
+                throw new Error((await r.text().catch(() => 'Ошибка добавления участников')) || `HTTP ${r.status}`);
+            }
+        }
+
+        for (const body of bodies) {
+            const r = await authFetch(`/chats/${chatId}/invite`, { method: 'POST', headers, body });
+            if (r.ok) { try { return await r.json(); } catch { return; } }
+            if (r.status !== 404 && r.status !== 405) {
+                throw new Error((await r.text().catch(() => 'Ошибка добавления участников')) || `HTTP ${r.status}`);
+            }
+        }
+
+        throw new Error('Эндпоинт добавления участников не найден (404/405)');
+    },
+
+
+
+    async uploadChatAvatar(chatId: number, file: File) {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('avatar', file);
+        const res = await authFetch(`${API}/chats/${chatId}/avatar`, {
+            method: 'POST',
+            body: form,
+        });
+        if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
+        return res.json() as Promise<{ avatarUrl: string }>;
     },
 
     me: () => http<MeDto>("/users/me"),
@@ -201,20 +356,33 @@ export const api = {
         (async () => {
             let payload = text;
 
-            if (opponentUserId) {
-                const attSecrets = getSecretsFor(attachments);
-                const body = attSecrets.length ? JSON.stringify({ t: text, att: attSecrets }) : text;
+            // соберём секреты вложений, если есть
+            const attSecrets = getSecretsFor(attachments);
+            const body = attSecrets.length ? JSON.stringify({ t: text, att: attSecrets }) : text;
 
+            if (opponentUserId) {
+                // 1:1 (dual) — как было
                 try {
-                    // для адресата
                     const forOpp = await encryptForUser(opponentUserId, body, authFetch);
-                    // для себя
                     const myId = Number(localStorage.getItem("userId"));
                     const forMe = await encryptForUser(myId, body, authFetch);
-
                     payload = packDual({ v: "e2ee:dual1", to: forOpp, me: forMe });
                 } catch (e) {
-                    console.error("E2EE encrypt failed", e);
+                    console.error("E2EE encrypt failed (1:1)", e);
+                }
+            } else {
+                // ГРУППА
+                try {
+                    // получаем актуальный список участников
+                    const members = await api.getChatMembers(chatId);
+                    const ids = members.map(m => m.id);
+                    // обязательно включаем себя (на случай если бэк отдал без нас)
+                    const myId = Number(localStorage.getItem("userId"));
+                    if (!ids.includes(myId)) ids.push(myId);
+
+                    payload = await encryptForGroup(ids, body, authFetch);
+                } catch (e) {
+                    console.error("E2EE encrypt failed (group)", e);
                 }
             }
 
@@ -290,6 +458,12 @@ export const api = {
             { method: "POST", body: JSON.stringify({ name, memberIds, avatarUrl }) }
         ),
 
+    removeChatMember: async (chatId: number, userId: number) => {
+        const res = await authFetch(`/chats/${chatId}/members/${userId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
+        try { return await res.json(); } catch { return; }
+    },
+
     getChatMembers: (chatId: number) =>
         http<{ id: number; name: string; avatarUrl?: string | null; isAdmin?: boolean; lastSeenMessageId?: number | null }[]>(
             `/chats/${chatId}/members`
@@ -306,36 +480,8 @@ export async function postLoginInit(userId?: number) {
     await selfTestE2EE(authFetch);
 }
 
-// ——— Загрузка с прогрессом ———
-// export async function uploadWithProgress(
-//     file: File,
-//     onProgress?: (p: number) => void
-// ): Promise<{ id: number; url?: string; thumbUrl?: string }> {
-//
-//     const bearer = token || localStorage.getItem("token");
-//
-//     const id = await new Promise<number>((resolve, reject) => {
-//         const xhr = new XMLHttpRequest();
-//         xhr.open("POST", `${API}/attachments`, true);            // строго через API, не "/api/..."
-//         const bearer = localStorage.getItem("token");            // берём токен
-//         if (bearer) xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
-//
-//         xhr.upload.onprogress = (ev) => { if (ev.lengthComputable && onProgress) onProgress(Math.round((ev.loaded/ev.total)*100)); };
-//         xhr.onreadystatechange = () => {
-//             if (xhr.readyState !== 4) return;
-//             if (xhr.status >= 200 && xhr.status < 300) {
-//                 try { resolve(JSON.parse(xhr.responseText).id); } catch { reject(new Error("bad JSON from /attachments")); }
-//             } else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
-//         };
-//         xhr.onerror = () => reject(new Error("Network error"));
-//         xhr.onabort  = () => reject(new Error("Upload aborted"));
-//
-//         const form = new FormData();
-//         form.append("file", new Blob([ct], { type: "application/octet-stream" }), file.name + ".enc");
-//         xhr.send(form);
-//     });
-//
-// }
+
+
 
 export async function uploadEncryptedWithProgress(
     file: File,
@@ -343,120 +489,71 @@ export async function uploadEncryptedWithProgress(
 ): Promise<{ id: number; url?: string }> {
     const buf = await file.arrayBuffer();
 
+    const guessMimeFromName = (name: string): string => {
+        const ext = name.split('.').pop()?.toLowerCase() || '';
+        const map: Record<string, string> = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', jpe: 'image/jpeg',
+            png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+            heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', svg: 'image/svg+xml',
+            mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v', webm: 'video/webm',
+            mp3: 'audio/mpeg', wav: 'audio/wav', oga: 'audio/ogg', ogg: 'audio/ogg',
+            pdf: 'application/pdf'
+        };
+        return map[ext] || 'application/octet-stream';
+    };
+    const effectiveMime = file.type && file.type !== 'application/octet-stream'
+        ? file.type
+        : guessMimeFromName(file.name);
+
     const keyB64 = randKeyB64(32);
     const ivB64 = randIvB64();
 
     const ct = await aesGcmEncryptToBlob(keyB64, ivB64, buf);
+
+    // 1) Загружаем ЗАШИФРОВАННЫЙ файл
     const form = new FormData();
     form.append("file", new Blob([ct], { type: "application/octet-stream" }), file.name + ".enc");
 
-    let thumbId: number | undefined;
-    let thumbIvB64: string | undefined;
+    const up = await authFetch(`/attachments`, { method: "POST", body: form });
+      if (!up.ok) throw new Error(await up.text());
+      const { id, url } = await up.json() as { id: number; url?: string };
 
-    if (file.type.startsWith("image/")) {
-        try {
-            const thumbBlob = await makeImageThumbBlob(file, 512);
-            thumbIvB64 = randIvB64();
-            const thumbCt = await aesGcmEncryptToBlob(keyB64, thumbIvB64, await thumbBlob.arrayBuffer());
-            const formThumb = new FormData();
-            formThumb.append("file", new Blob([thumbCt], { type: "application/octet-stream" }), file.name + ".thumb.enc");
-
-            // важно: авторизованный запрос
-            const resT = await authFetch(`${API}/attachments`, { method: "POST", body: formThumb });
-            if (!resT.ok) throw new Error(await resT.text());
-            const jT = await resT.json();
-            thumbId = jT.id;
-        } catch (e) {
-            console.warn("thumb gen/upload failed", e);
-        }
-    }
-
-    const id = await new Promise<number>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `${API}/attachments`, true);
-        const bearer = token || localStorage.getItem("token");
-        if (bearer) xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
-
-        xhr.upload.onprogress = (ev) => { if (ev.lengthComputable && onProgress) onProgress(Math.round((ev.loaded / ev.total) * 100)); };
-        xhr.onreadystatechange = () => {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status >= 200 && xhr.status < 300) {
-                try { resolve(JSON.parse(xhr.responseText).id); } catch { reject(new Error("bad JSON from /attachments")); }
-            } else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
-        };
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.onabort = () => reject(new Error("Upload aborted"));
-        const form = new FormData();
-        form.append("file", new Blob([ct], { type: "application/octet-stream" }), file.name + ".enc");
-        xhr.send(form);
-    });
-
-    const secret: AttSecret = {
-        id, k: keyB64, iv: ivB64,
-        mime: file.type || "application/octet-stream",
-        name: file.name, size: file.size,
-        sha256: await sha256(buf),
-        ...(thumbId ? { thumbId, thumbIv: thumbIvB64! } : {})
-    };
-    cacheAttSecrets([secret]);
-
-    return { id };
-}
-
-export async function maybeDecryptMessage(senderId: number, text: string): Promise<string> {
-    // быстрый выход: не шифротекст — не трогаем
-    if (!text || (!text.startsWith("E2EE1:") && !text.startsWith("E2EED1:"))) return text;
-
-    try {
-        const dual = unpackDual(text);
-        if (dual) {
-            // если сообщение моё — сначала пробуем ветку "me", иначе "to"
-            const myId = Number(localStorage.getItem("userId"));
-            const halves = senderId === myId ? [dual.me, dual.to] : [dual.to, dual.me];
-
-            for (const wrapped of halves) {
-                try {
-                    const pt = await tryDecryptFrom(senderId, wrapped, authFetch);
-                    if (!pt) continue;
-
-                    // возможно внутри JSON с секретами вложений
-                    if (pt.startsWith("{")) {
-                        try {
-                            const obj = JSON.parse(pt);
-                            if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att as AttSecret[]);
-                            if (typeof obj?.t === "string") return obj.t;
-                        } catch { /* ignore json */ }
-                    }
-                    return pt;
-                } catch { /* попробуем вторую половину */ }
-            }
-
-            // обе половины не подошли
-            return "🔒 Сообщение зашифровано (не удалось расшифровать)";
-        }
-
-        // Обычный E2EE1
-        const pt = await tryDecryptFrom(senderId, text, authFetch);
-        if (!pt) return "🔒 Сообщение зашифровано (не удалось расшифровать)";
-
-        if (pt.startsWith("{")) {
+          if (effectiveMime.startsWith("image/")) {
             try {
-                const obj = JSON.parse(pt);
-                if (obj?.att && Array.isArray(obj.att)) cacheAttSecrets(obj.att as AttSecret[]);
-                if (typeof obj?.t === "string") return obj.t;
-            } catch { /* ignore */ }
+                const imgThumb = await makeImageThumbBlob(file, 512);
+                      const fT = new FormData();
+                      fT.append("file", imgThumb, "thumb.jpg");
+                      const resT = await authFetch(`/attachments/${id}/thumb`, { method: "POST", body: fT });
+                      if (!resT.ok) console.warn("thumb upload failed", await resT.text());
+            } catch (e) {
+                console.warn("thumb gen/upload failed", e);
+            }
         }
-        return pt;
-    } catch (e) {
-        console.warn("E2EE decrypt failed", e);
-        return "🔒 Сообщение зашифровано (не удалось расшифровать)";
+
+
+          const secret: AttSecret = {
+                    id, k: keyB64, iv: ivB64,
+                mime: effectiveMime,
+                name: file.name,
+                size: file.size
+          };
+        cacheAttSecrets([secret]);
+
+              onProgress?.(100);
+          return { id, url };
     }
-}
 
-
-async function sha256(ab: ArrayBuffer): Promise<string> {
-    const h = await crypto.subtle.digest("SHA-256", ab);
-    return btoa(String.fromCharCode(...new Uint8Array(h)));
+export async function fetchAndDecryptAttachment(id: number) {
+    const r = await authFetch(`/attachments/${id}/content`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const encBlob = await r.blob();
+      const s = getSecretById(id);
+          if (!s?.k || !s?.iv) return encBlob;
+      const ab = await encBlob.arrayBuffer();
+      const key = await importRawAes(s.k);
+      const iv = new Uint8Array(b64d(s.iv));
+      const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ab);
+      return new Blob([pt], { type: s.mime || "application/octet-stream" });
 }
 function b64d(s: string): ArrayBuffer {
     const bin = atob(s); const u8 = new Uint8Array(bin.length);
@@ -479,11 +576,6 @@ async function aesGcmEncryptToBlob(keyB64: string, ivB64: string, data: ArrayBuf
     const iv = new Uint8Array(b64d(ivB64));
     return crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data);
 }
-async function aesGcmDecryptToArrayBuffer(keyB64: string, ivB64: string, data: ArrayBuffer): Promise<ArrayBuffer> {
-    const key = await importRawAes(keyB64);
-    const iv = new Uint8Array(b64d(ivB64));
-    return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
-}
 
 async function makeImageThumbBlob(file: File, maxSide = 512): Promise<Blob> {
     const img = document.createElement("img");
@@ -499,32 +591,11 @@ async function makeImageThumbBlob(file: File, maxSide = 512): Promise<Blob> {
     return new Promise<Blob>((res) => canvas.toBlob(b => res(b!), "image/jpeg", 0.82));
 }
 
-export async function fetchAndDecryptAttachment(id: number): Promise<Blob> {
-    const url = `${API}/attachments/${id}`;
-    const res = await authFetch(url);
-    if (!res.ok) throw new Error(await res.text());
-    const ct = await res.arrayBuffer();
 
-    const sec = getSecretById(id);
-    // если секретов нет — файл, видимо, не шифровали
-    if (!sec) return new Blob([ct], { type: "application/octet-stream" });
-
-    const pt = await aesGcmDecryptToArrayBuffer(sec.k, sec.iv, ct);
-    return new Blob([pt], { type: sec.mime || "application/octet-stream" });
-}
-
-export async function fetchAndDecryptThumb(id: number): Promise<Blob | null> {
-    const sec = getSecretById(id);
-    if (!sec?.thumbId || !sec.thumbIv) return null;
-
-    const url = `${API}/attachments/${sec.thumbId}`;
-    const res = await authFetch(url);
-    if (res.status === 404) return null;
-    if (!res.ok) return null;
-
-    const ct = await res.arrayBuffer();
-    const pt = await aesGcmDecryptToArrayBuffer(sec.k, sec.thumbIv, ct);
-    return new Blob([pt], { type: "image/jpeg" });
+export async function fetchAndDecryptThumb(id: number) {
+    const r = await authFetch(`/attachments/${id}/thumb`);
+    if (r.ok) return r.blob();
+    return fetchAndDecryptAttachment(id);
 }
 
 const E2EE_DUAL_PREFIX = "E2EED1:";
