@@ -35,22 +35,24 @@ services:
       - "8080"                                   # доступно ТОЛЬКО в сети докера
 
   web:
+    image: nginx:1.27-alpine
     environment:
-      - DOMAIN=chat-flow.ru
-    build:
-      context: ./WebClient
-      dockerfile: Dockerfile
-      args:
-        VITE_API_BASE: ${VITE_API_BASE}          # обычно /api
-        VITE_HUB_URL: ${VITE_HUB_URL}            # обычно /chatHub
-    restart: unless-stopped
-    depends_on:
-      - api
-
-    expose:
-      - "80"
+      - DOMAIN=${DOMAIN}
+    depends_on: [ api ]
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
-      - avatars:/usr/share/nginx/html/avatars:ro # фронт читает те же аватары
+      # шаблон → /etc/nginx/templates/
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # статика SPA (после сборки WebClient)
+      - ./WebClient/dist:/usr/share/nginx/html:ro
+      # для ACME и сертификатов
+      - certbot-www:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+      # общие аватары
+      - avatars:/usr/share/nginx/html/avatars:ro
+
 
   nginx:
     image: nginx:1.27-alpine
