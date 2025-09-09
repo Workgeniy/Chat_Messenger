@@ -43,15 +43,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # шаблон → /etc/nginx/templates/
       - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
-      # статика SPA (после сборки WebClient)
       - ./WebClient/dist:/usr/share/nginx/html:ro
-      # для ACME и сертификатов
       - certbot-www:/var/www/certbot
       - letsencrypt:/etc/letsencrypt
-      # общие аватары
-      - avatars:/usr/share/nginx/html/avatars:ro
+      - avatars:/var/www/avatars:ro
 
 
   nginx:
