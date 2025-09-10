@@ -16,7 +16,7 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 # шаблон кладём именно в /etc/nginx/templates — тогда entrypoint сделает envsubst
-COPY ./nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY ./nginx.conf /etc/nginx/conf.d/default.conf
 
 # статика внутрь образа
 COPY --from=builder /app/dist /usr/share/nginx/html
