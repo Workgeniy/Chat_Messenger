@@ -35,16 +35,19 @@ services:
       - "8080"                                   # доступно ТОЛЬКО в сети докера
 
   web:
-    image: nginx:1.27-alpine
+    build:
+      context: ./WebClient
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+        VITE_HUB_URL: ${VITE_HUB_URL}
     environment:
       - DOMAIN=${DOMAIN}
-    depends_on: [ api ]
+    depends_on: [api]
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ./WebClient/dist:/usr/share/nginx/html:ro
       - certbot-www:/var/www/certbot
       - letsencrypt:/etc/letsencrypt
       - avatars:/var/www/avatars:ro
