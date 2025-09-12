@@ -117,13 +117,13 @@ export default function ChatWindow(props: Props) {
     useEffect(() => { setRendered(messages as MsgWithPlain[]); }, [messages]);
 
     useEffect(() => {
-        if (!onSeen || messages.length === 0) return;
+        if (!onSeen || !messages.length) return;
         const lastId = messages[messages.length - 1].id;
         if (lastSeenSentRef.current !== lastId) {
             onSeen(lastId);
             lastSeenSentRef.current = lastId;
         }
-    }, [messages.length, onSeen]);
+    }, [messages, onSeen]);
 
     useEffect(() => {
         document.title = `ChatFlow — ${props.title ?? "Чат"}`;

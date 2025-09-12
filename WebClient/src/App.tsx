@@ -639,7 +639,7 @@ export default function App() {
     // ---------- MAIN UI ----------
     return (
         <div className="app-shell" style={{ display: "grid", gridTemplateColumns:isNarrow ? "1fr" :
-                "minmax(320px, 32%) 1fr", height: "100vh", width: "100vw", maxWidth: "100%", overflow: "hidden" }}>
+                "minmax(320px, 32%) 1fr", height: "100vh", width: "100%", maxWidth: "100%", overflow: "hidden" }}>
             <div style={{ position: "fixed", top: 10, left: 10, zIndex: 60,
                 display: isNarrow && active ? "none" : "block" }}>
                 <AvatarMenu

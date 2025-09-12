@@ -19,6 +19,19 @@ html, body, #root {
     margin: 0;
     padding: 0;
 }
+
+/* резервируем место под скроллбар всегда */
+html { scrollbar-gutter: stable; }
+
+/* fallback для старых браузеров */
+@supports not (scrollbar-gutter: stable) {
+    body { overflow-y: scroll; }
+}
+
+/* чтобы модалки не прокручивали фон */
+body.modal-open { overflow: hidden; }
+
+
 * { box-sizing: border-box; }
 
 a {

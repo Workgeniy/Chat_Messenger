@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {fetchAndDecryptAttachment, fetchAndDecryptThumb, getAttachmentLocalMeta} from "../../lib/api";
+import VideoPlayer from "../Media/VideoPlayer.tsx";
+import {makePosterFromVideoBlob} from "../../lib/media.ts";
 
 type Att = { id: number | string; url?: string; contentType?: string; fileName?: string; sizeBytes?: number; };
 
@@ -15,6 +17,13 @@ export function Attachment({ a }: { a: Att }) {
     const name = (a.fileName || "").toLowerCase();
     const looksLikeImageByExt = /\.(png|jpe?g|gif|webp|heic|heif|bmp|svg)$/.test(name);
     const isImage = mime.startsWith("image/") || looksLikeImageByExt;
+
+    const id = Number(a.id);
+    const ct = (a.contentType || "").toLowerCase();
+
+    if (ct.startsWith("video/") || ct.includes("quicktime") || ct === "application/octet-stream") {
+        return <VideoAttachment id={id} />;
+    }
 
     useEffect(() => {
         let revoke: string | null = null;
@@ -59,6 +68,33 @@ export function Attachment({ a }: { a: Att }) {
         if (viewer.blobUrl) URL.revokeObjectURL(viewer.blobUrl);
         setViewer({ open: false });
     }
+
+    function VideoAttachment({ id }: { id: number }) {
+        const [src, setSrc] = useState<string>();
+        const [poster, setPoster] = useState<string>();
+
+        useEffect(() => {
+            let url: string | undefined;
+            let cancelled = false;
+
+            (async () => {
+                const blob = await fetchAndDecryptAttachment(id);
+                if (cancelled) return;
+                url = URL.createObjectURL(blob);
+                setSrc(url);
+                const p = await makePosterFromVideoBlob(blob);
+                if (!cancelled && p) setPoster(p);
+            })();
+
+            return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+        }, [id]);
+
+        if (!src) return <div style={{width:240, height:135, background:"#eee", borderRadius:10}} />;
+
+        return <VideoPlayer src={src} poster={poster} />;
+    }
+
+
 
     const prettySize = useMemo(() => {
         const s = a.sizeBytes ?? 0; if (!s) return "";
