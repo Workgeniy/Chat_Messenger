@@ -8,20 +8,19 @@
     z-index: 1000;
 }
 
+/* фиксированная высота всей карточки — ничего не «подскакивает» */
 .card {
     width: min(520px, calc(100vw - 32px));
-    max-width: 100%;
-    max-height: min(80vh, 640px);
+    height: min(80vh, 560px);         /* <-- было max-height, ставим height */
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 10px 30px rgba(0,0,0,.25);
     padding: 16px;
 
-    /* фиксируем компоновку карточки: инпут / ошибка / СПИСОК / футер */
     display: grid;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto; /* input / error / LIST / footer */
     gap: 12px;
-    overflow: hidden;
+    overflow: hidden;                 /* скролл только внутри .list */
 }
 
 .input {
@@ -32,38 +31,45 @@
 }
 .input:focus{ border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
 
+/* список всегда одного «слота» высоты; скролл — всегда видимый/стабильный */
 .list {
-    overflow-y: scroll;                 /* <- ключ! (а не auto) */
-    scrollbar-gutter: stable both-edges;/* где поддерживается – ещё лучше */
-    min-height: 320px;                  /* чтобы при появлении результатов высота не менялась */
-    padding-right: 6px;
+    min-height: 0;                    /* важно для grid 1fr */
+    overflow-y: scroll;               /* всегда резервирует полосу */
+    scrollbar-gutter: stable both-edges;
+    padding-right: 8px;               /* запас на полосу (для Win) */
+    contain: layout paint;            /* изоляция перерисовок внутри списка */
 }
 
+/* ровные строки фикс-высоты */
 .row {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 8px 4px;
-    min-height: 56px;
+    height: 56px;                     /* фикс вместо min-height */
     border-bottom: 1px solid #f2f2f2;
 }
 .row:hover{ background:#f9fafb; }
 
+/* аватар фиксированный и заранее известный для браузера */
 .avatar {
-    width: 36px;
-    height: 36px;
+    width: 36px; height: 36px;        /* синхронизируем с width/height атрибутами в JSX */
     border-radius: 50%;
     flex: 0 0 36px;
     object-fit: cover;
     display: block;
 }
+
 .meta { min-width: 0; flex: 1; }
 .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .email { font-size: 12px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* фикс ширины кнопки, чтобы разные надписи не «гуляли» */
 .primary{
     background:#2563eb; color:#fff; border:none; padding:8px 12px;
     border-radius:10px; cursor:pointer;
+    min-width: 110px;                 /* стабилизируем ширину */
+    text-align: center;
 }
 .primary:hover{ filter:brightness(1.05); }
 
@@ -80,6 +86,7 @@
 .error{ color:#b91c1c; padding:8px 0; }
 .empty{ color:#6b7280; padding:8px 0; text-align:center; }
 
+/* подстраховка для браузеров без scrollbar-gutter */
 @supports not (scrollbar-gutter: stable) {
-    .list { padding-right: 14px; } /* резерв под полосу скролла */
+    .list { padding-right: 16px; }
 }
