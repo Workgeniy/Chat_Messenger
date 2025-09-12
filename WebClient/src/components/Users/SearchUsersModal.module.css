@@ -11,16 +11,18 @@
 /* фиксированная высота всей карточки — ничего не «подскакивает» */
 .card {
     width: min(520px, calc(100vw - 32px));
-    height: min(80vh, 560px);         /* <-- было max-height, ставим height */
+    max-height: min(80vh, 560px);   /* ограничиваем карточку по высоте */
+    overflow: auto;                  /* <- скролл теперь у карточки, не у списка */
+    overscroll-behavior: contain;    /* чтобы не «пробивался» скролл заднего плана */
+
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 10px 30px rgba(0,0,0,.25);
     padding: 16px;
 
     display: grid;
-    grid-template-rows: auto auto 1fr auto; /* input / error / LIST / footer */
+    grid-template-rows: auto auto auto auto; /* убираем 1fr, список не фиксируем */
     gap: 12px;
-    overflow: hidden;                 /* скролл только внутри .list */
 }
 
 .input {
@@ -32,12 +34,12 @@
 .input:focus{ border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
 
 /* список всегда одного «слота» высоты; скролл — всегда видимый/стабильный */
+/* список больше не скроллится сам */
 .list {
-    min-height: 0;                    /* важно для grid 1fr */
-    overflow-y: scroll;               /* всегда резервирует полосу */
-    scrollbar-gutter: stable both-edges;
-    padding-right: 8px;               /* запас на полосу (для Win) */
-    contain: layout paint;            /* изоляция перерисовок внутри списка */
+    overflow: visible;
+    padding-right: 0;         /* резерв под полосу больше не нужен */
+    min-height: 0;            /* на случай редких браузерных артефактов с grid */
+    /* scrollbar-gutter больше не нужен */
 }
 
 /* ровные строки фикс-высоты */
