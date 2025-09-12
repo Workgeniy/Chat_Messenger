@@ -1,37 +1,64 @@
-.backdrop{
-    position:fixed; inset:0;
-    background:rgba(0,0,0,.32);
-    display:flex; align-items:center; justify-content:center;
-    z-index:2000; /* поверх всего */
+.backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.35);
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    z-index: 1000;
 }
 
-.card{
-    width:min(680px, 92vw);
-    max-height:80vh; overflow:auto;
-    background:#fff; border:1px solid #e5e7eb; border-radius:16px;
-    box-shadow:0 20px 48px rgba(0,0,0,.18);
-    padding:16px;
+.card {
+    width: min(520px, calc(100vw - 32px));
+    max-width: 100%;
+    max-height: min(80vh, 640px);
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    padding: 16px;
+    display: grid;
+    grid-template-rows: auto /* input */
+                       auto /* error (если есть) */
+                       1fr  /* Список – скроллим только его */
+                       auto /* футер/кнопки */;
+    gap: 12px;
+    overflow: hidden; /* чтобы список не «выпадал» */
 }
 
-.input{
-    width:100%; padding:10px 12px;
-    border:1px solid #e5e7eb; border-radius:10px;
-    margin-bottom:10px; outline:none;
+.input {
+    height: 40px;
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
 }
 .input:focus{ border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
 
-.list{ max-height:60vh; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+.list {
+    overflow-y: auto;
+    scrollbar-gutter: stable both-edges; /* убирает «рывок» при появлении скролла */
+    padding-right: 6px; /* чтобы контент не поджимался ползунком */
+}
 
-.row{
-    display:flex; align-items:center; gap:12px;
-    padding:8px; border:1px solid #f0f2f5; border-radius:10px; background:#fff;
+.row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px;
+    min-height: 56px;      /* фикс высота строки => меньше скачков */
+    border-bottom: 1px solid #f2f2f2;
 }
 .row:hover{ background:#f9fafb; }
 
-.avatar{ width:36px; height:36px; border-radius:50%; object-fit:cover; border:1px solid #e5e7eb; }
-.meta{ flex:1; min-width:0; }
-.name{ font-weight:600; }
-.email{ font-size:12px; color:#6b7280; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex: 0 0 36px;
+    object-fit: cover;
+}
+.meta { min-width: 0; flex: 1; }
+.name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.email { font-size: 12px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .primary{
     background:#2563eb; color:#fff; border:none; padding:8px 12px;
@@ -39,7 +66,10 @@
 }
 .primary:hover{ filter:brightness(1.05); }
 
-.footer{ display:flex; justify-content:flex-end; margin-top:10px; }
+.footerRow, .footer {
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+}
 .close{
     background:#f3f4f6; border:1px solid #e5e7eb; padding:8px 12px;
     border-radius:10px; cursor:pointer;
