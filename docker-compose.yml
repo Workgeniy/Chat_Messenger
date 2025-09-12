@@ -36,8 +36,11 @@ services:
 
   nginx:
     build:
-      context: ./WebClient          # контекст = папка WebClient
-      dockerfile: nginx/Dockerfile  # Dockerfile в WebClient/nginx/Dockerfile
+      context: ./WebClient
+      dockerfile: nginx/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+        VITE_HUB_URL: ${VITE_HUB_URL}
     depends_on: [ api ]
     ports:
       - "80:80"
