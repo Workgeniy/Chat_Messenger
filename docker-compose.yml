@@ -36,8 +36,8 @@ services:
 
   nginx:
     build:
-      context: .
-      dockerfile: nginx/Dockerfile
+      context: .                      # корень репо
+      dockerfile: WebClient/nginx/Dockerfile
       args:
         VITE_API_BASE: ${VITE_API_BASE}
         VITE_HUB_URL: ${VITE_HUB_URL}
@@ -48,8 +48,9 @@ services:
     volumes:
       - certbot-www:/var/www/certbot
       - letsencrypt:/etc/letsencrypt
-      - avatars:/var/www/avatars:ro          # nginx читает те же аватары (alias)
+      - avatars:/var/www/avatars:ro
     restart: unless-stopped
+
 
   certbot:
     image: certbot/certbot:latest
