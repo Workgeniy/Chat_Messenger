@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type FoundUser } from "../../lib/api";
 import styles from "./SearchUsersModal.module.css";
+import Avatar from "../common/Avatar.tsx";
 
 
 type Props = {
@@ -51,8 +52,6 @@ export default function SearchUsersModal(props: Props) {
         return () => clearTimeout(t);
     }, [q, currentUserId, excludeUserIds]);
 
-    const fallback = (name?: string) => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || "U")}`;
-
     const toggle = (id: number) => {
         setSelected(prev => {
             const next = new Set(prev);
@@ -82,14 +81,12 @@ export default function SearchUsersModal(props: Props) {
 
                     {items.map(u => (
                         <div className={styles.row} key={u.id}>
-                            <img
+                            <Avatar
+                                src={u.avatarUrl}
+                                name={u.name}
+                                size={36}
                                 className={styles.avatar}
-                                src={u.avatarUrl || fallback(u.name)}
-                                onError={(e) => {
-                                    const fb = fallback(u.name);
-                                    if (e.currentTarget.src !== fb) e.currentTarget.src = fb;
-                                }}
-                                alt=""
+                                title={u.name}
                             />
                             <div className={styles.meta}>
                                 <div className={styles.name}>{u.name}</div>
@@ -108,7 +105,6 @@ export default function SearchUsersModal(props: Props) {
                                 <button
                                     className={styles.primary}
                                     onClick={async () => {
-                                        // создаём/получаем диалог и отдаём chatId
                                         const chat = await api.startChatWith(u.id);
                                         await onPick?.(chat.id);
                                         onClose();
@@ -119,7 +115,6 @@ export default function SearchUsersModal(props: Props) {
                             )}
                         </div>
                     ))}
-                </div>
 
                 {multiSelect && (
                     <div className={styles.footerRow}>
@@ -141,6 +136,7 @@ export default function SearchUsersModal(props: Props) {
                     <div className={styles.footer}><button className={styles.close} onClick={onClose}>Закрыть</button></div>
                 )}
             </div>
+        </div>
         </div>
     );
 }

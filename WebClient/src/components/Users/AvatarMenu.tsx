@@ -1,6 +1,7 @@
 // src/components/Users/AvatarMenu.tsx
 import { useRef, useState, useEffect } from "react";
 import styles from "./AvatarMenu.module.css";
+import Avatar from "../common/Avatar.tsx";
 
 type Props = {
     name: string;
@@ -87,7 +88,7 @@ export default function AvatarMenu({
                     style={{ maxHeight: "70vh", overflowY: "auto" }}
                 >
                     <div className={styles.me}>
-                        {avatarUrl ? <img src={avatarUrl} alt={name} className={styles.meAvatar} /> : <div className={styles.meAvatar}>{initial}</div>}
+                        <Avatar src={avatarUrl} name={name} size={40} className={styles.meAvatar} />
                         <div className={styles.meText}>
                             <div className={styles.meName}>{name}</div>
                             {email && <div className={styles.meEmail}>{email}</div>}
