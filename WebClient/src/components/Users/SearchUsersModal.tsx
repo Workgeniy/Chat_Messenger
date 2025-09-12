@@ -73,8 +73,18 @@ export default function SearchUsersModal(props: Props) {
                 {err && <div className={styles.error}>{err}</div>}
 
                 <div className={styles.list}>
-                    {q.trim().length < 2 && <div className={styles.row}>Начните вводить имя/почту…</div>}
-                    {/*{q.trim().length >= 2 && loading && <div className={styles.row}>Ищем…</div>}*/}
+                    {q.trim().length < 2 && (
+                        <div className={styles.row}>Начните вводить имя/почту…</div>
+                    )}
+
+                    {q.trim().length >= 2 && loading && (
+                        <div className={styles.row}>Ищем…</div>
+                    )}
+
+                    {q.trim().length >= 2 && !loading && err && (
+                        <div className={styles.error}>{err}</div>
+                    )}
+
                     {q.trim().length >= 2 && !loading && !err && items.length === 0 && (
                         <div className={styles.empty}>Ничего не найдено</div>
                     )}
