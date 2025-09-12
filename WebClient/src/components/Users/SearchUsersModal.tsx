@@ -32,6 +32,21 @@ export default function SearchUsersModal(props: Props) {
     useEffect(() => { inputRef.current?.focus(); }, []);
 
     useEffect(() => {
+        const prevOverflow = document.body.style.overflow;
+        const prevPadRight = document.body.style.paddingRight;
+
+        const sbw = window.innerWidth - document.documentElement.clientWidth; // ширина системного скроллбара
+        document.body.style.overflow = "hidden";
+        if (sbw > 0) document.body.style.paddingRight = `${sbw}px`;
+
+        return () => {
+            document.body.style.overflow = prevOverflow;
+            document.body.style.paddingRight = prevPadRight;
+        };
+    }, []);
+
+
+    useEffect(() => {
         setErr(null);
         const t = setTimeout(async () => {
             const query = q.trim();

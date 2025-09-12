@@ -1,22 +1,20 @@
-/* было: display:grid; place-items:center */
+/* backdrop остаётся простым затемнителем */
 .backdrop{
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,.35);
-    /* центрируем только по горизонтали, сверху небольшой отступ */
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    padding: 24px 16px;         /* чтобы была «подушка» по краям */
     z-index: 1000;
-    overflow: hidden;           /* фон не скроллится */
 }
 
-/* вместо grid -> flex-колонка с фиксированной высотой */
+/* КАРТА теперь fixed и центрируется transform'ом */
 .card{
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+
     width: min(520px, calc(100vw - 32px));
-    max-width: 100%;
-    height: clamp(420px, 78vh, 640px);   /* ЖЁСТКАЯ высота карточки */
+    height: clamp(420px, 78vh, 640px);   /* жёсткая высота */
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 10px 30px rgba(0,0,0,.25);
@@ -25,30 +23,28 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    overflow: hidden;           /* скролл внутри .list, карта не меняет высоту */
-    /* мелкие стабилизаторы лейаута */
-    contain: layout paint size;
+    overflow: hidden;
+
+    /* чтобы браузер не «дёргал» слой при перерисовке */
     will-change: transform;
+    contain: layout paint size;
 }
 
-/* строки сверху карточки – не расширяются */
-.input{ height: 40px; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
-.error{ color:#b91c1c; }
-.empty{ color:#6b7280; text-align:center; }
-
-/* КОНТЕНТ-ОБЛАСТЬ: единственное место, где есть прокрутка */
+/* скролл — только внутри списка, а не у карточки/страницы */
 .list{
-    flex: 1 1 0;                /* занимает всё доступное */
-    min-height: 0;              /* важно для flex, чтобы разрешить сжиматься */
-    overflow: auto;             /* скролл только здесь */
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
     padding-right: 8px;
     scrollbar-gutter: stable both-edges;
 }
+
 @supports not (scrollbar-gutter: stable){
     .list{ padding-right: 14px; }
 }
 
-/* остальное оставляем как было */
+/* остальное как было */
+.input{ height:40px; padding:8px 12px; border:1px solid #e5e7eb; border-radius:10px; }
 .row{ display:flex; align-items:center; gap:12px; padding:8px 4px; min-height:56px; border-bottom:1px solid #f2f2f2; }
 .avatar{ width:36px; height:36px; border-radius:50%; flex:0 0 36px; object-fit:cover; display:block; }
 .meta{ min-width:0; flex:1; }
