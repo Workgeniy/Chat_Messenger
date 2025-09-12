@@ -1,30 +1,22 @@
-# --- Stage 1: build SPA ---
-FROM node:20-alpine AS builder
-WORKDIR /web
+# ---------- Stage 1: build фронта ----------
+FROM node:20-alpine AS client
+WORKDIR /app
+COPY package*.json ./
+COPY vite.config.ts ./
+COPY src ./src
+COPY public ./public
+RUN npm ci && npm run build
 
-# deps
-COPY ./WebClient/package*.json ./
-RUN npm ci
+# ---------- Stage 2: nginx ----------
+FROM nginx:1.25-alpine AS nginx
+# чистим дефолтные конфиги
+RUN rm -f /etc/nginx/conf.d/*
 
-# sources
-COPY ./WebClient/ ./
+# КОНФИГ: путь внутри контекста ./WebClient
+COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 
-# vite env (прокидываются из docker-compose -> ARG)
-ARG VITE_API_BASE
-ARG VITE_HUB_URL
-ENV VITE_API_BASE=$VITE_API_BASE
-ENV VITE_HUB_URL=$VITE_HUB_URL
+# статика SPA
+COPY --from=client /app/dist /usr/share/nginx/html
 
-RUN npm run build
-
-# --- Stage 2: nginx ---
-FROM nginx:1.27-alpine
-
-# наш конфиг nginx
-COPY default.conf /etc/nginx/conf.d/default.conf
-
-# собранный фронт
-COPY --from=builder /web/dist /usr/share/nginx/html
-
-# каталог для alias (том примонтируем поверх)
+# директория для аватаров (монтируется volume'ом как :ro)
 RUN mkdir -p /var/www/avatars
