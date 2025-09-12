@@ -1,91 +1,57 @@
-.backdrop {
+/* было: display:grid; place-items:center */
+.backdrop{
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,.35);
-    display: grid;
-    place-items: center;
-    padding: 16px;
+    /* центрируем только по горизонтали, сверху небольшой отступ */
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 24px 16px;         /* чтобы была «подушка» по краям */
     z-index: 1000;
+    overflow: hidden;           /* фон не скроллится */
 }
 
-/* фиксированная высота всей карточки — ничего не «подскакивает» */
-.card {
+/* вместо grid -> flex-колонка с фиксированной высотой */
+.card{
     width: min(520px, calc(100vw - 32px));
     max-width: 100%;
-    /* фикс высоты карточки: не дергается */
-    max-height: min(80vh, 640px);
-    display: grid;
-    grid-template-rows: auto auto minmax(320px, 1fr) auto; /* список всегда занимает одинаковую «строку» */
-    gap: 12px;
-    overflow: hidden;
-}
+    height: clamp(420px, 78vh, 640px);   /* ЖЁСТКАЯ высота карточки */
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    padding: 16px;
 
-.input {
-    height: 40px;
-    padding: 8px 12px;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-}
-.input:focus{ border-color:#7aa2ff; box-shadow:0 0 0 3px rgba(68,115,255,.12); }
-
-/* список всегда одного «слота» высоты; скролл — всегда видимый/стабильный */
-/* список больше не скроллится сам */
-.list{
-    /* ключ: собственный скролл у списка */
-    overflow-y: auto;
-    min-height: 320px;      /* фиксируем стартовую высоту, чтобы на «Ищем…»/«Ничего нет» не прыгало */
-    /* чтобы появление полосы не двигало контент (в поддерживаемых браузерах) */
-    scrollbar-gutter: stable both-edges;
-    padding-right: 6px;
-}
-
-/* ровные строки фикс-высоты */
-.row {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 12px;
-    padding: 8px 4px;
-    height: 56px;                     /* фикс вместо min-height */
-    border-bottom: 1px solid #f2f2f2;
-}
-.row:hover{ background:#f9fafb; }
-
-/* аватар фиксированный и заранее известный для браузера */
-.avatar {
-    width: 36px; height: 36px;        /* синхронизируем с width/height атрибутами в JSX */
-    border-radius: 50%;
-    flex: 0 0 36px;
-    object-fit: cover;
-    display: block;
+    overflow: hidden;           /* скролл внутри .list, карта не меняет высоту */
+    /* мелкие стабилизаторы лейаута */
+    contain: layout paint size;
+    will-change: transform;
 }
 
-.meta { min-width: 0; flex: 1; }
-.name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.email { font-size: 12px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* строки сверху карточки – не расширяются */
+.input{ height: 40px; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.error{ color:#b91c1c; }
+.empty{ color:#6b7280; text-align:center; }
 
-/* фикс ширины кнопки, чтобы разные надписи не «гуляли» */
-.primary{
-    background:#2563eb; color:#fff; border:none; padding:8px 12px;
-    border-radius:10px; cursor:pointer;
-    min-width: 110px;                 /* стабилизируем ширину */
-    text-align: center;
+/* КОНТЕНТ-ОБЛАСТЬ: единственное место, где есть прокрутка */
+.list{
+    flex: 1 1 0;                /* занимает всё доступное */
+    min-height: 0;              /* важно для flex, чтобы разрешить сжиматься */
+    overflow: auto;             /* скролл только здесь */
+    padding-right: 8px;
+    scrollbar-gutter: stable both-edges;
 }
-.primary:hover{ filter:brightness(1.05); }
+@supports not (scrollbar-gutter: stable){
+    .list{ padding-right: 14px; }
+}
 
-.footerRow, .footer {
-    border-top: 1px solid #eee;
-    padding-top: 8px;
-}
-.close{
-    background:#f3f4f6; border:1px solid #e5e7eb; padding:8px 12px;
-    border-radius:10px; cursor:pointer;
-}
-.close:hover{ background:#eef1f4; }
-
-.error{ color:#b91c1c; padding:8px 0; }
-.empty{ color:#6b7280; padding:8px 0; text-align:center; }
-
-/* подстраховка для браузеров без scrollbar-gutter */
-@supports not (scrollbar-gutter: stable) {
-    .list { padding-right: 16px; }
-}
+/* остальное оставляем как было */
+.row{ display:flex; align-items:center; gap:12px; padding:8px 4px; min-height:56px; border-bottom:1px solid #f2f2f2; }
+.avatar{ width:36px; height:36px; border-radius:50%; flex:0 0 36px; object-fit:cover; display:block; }
+.meta{ min-width:0; flex:1; }
+.name{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.email{ font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.footerRow,.footer{ border-top:1px solid #eee; padding-top:8px; }
