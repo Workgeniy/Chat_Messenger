@@ -1,20 +1,27 @@
-# ===== builder (Vite) =====
-FROM node:20-alpine AS builder
+# ---------- Stage 1: сборка фронта ----------
+FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
 
-COPY . .
-ARG VITE_API_BASE=/api
-ARG VITE_HUB_URL=/chatHub
-ENV VITE_API_BASE=$VITE_API_BASE
-ENV VITE_HUB_URL=$VITE_HUB_URL
+# копируем всё нужное для vite/tsc
+COPY tsconfig*.json ./
+COPY vite.config.* ./
+COPY index.html ./
+COPY src ./src
+COPY public ./public
+
 RUN npm run build
 
-# ===== runtime (nginx) =====
-FROM nginx:1.27-alpine
+# ---------- Stage 2: Nginx ----------
+FROM nginx:1.25-alpine
 
+# (не обязательно, но чисто)
+RUN rm -f /etc/nginx/conf.d/*
 
-# статика внутрь образа
-COPY --from=builder /app/dist /usr/share/nginx/html
+# собранный фронт
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# каталог для аватаров (том примонтируется сюда)
+RUN mkdir -p /var/www/avatars
