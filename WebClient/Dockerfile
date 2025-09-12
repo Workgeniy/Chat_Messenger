@@ -21,7 +21,7 @@ FROM nginx:1.25-alpine
 RUN rm -f /etc/nginx/conf.d/*
 
 # собранный фронт
-COPY --from=build /app/dist /var/www/avatars/
+COPY --from=build /app/dist /usr/share/nginx/html
 
 # каталог для аватаров (том примонтируется сюда)
 RUN mkdir -p /var/www/avatars
