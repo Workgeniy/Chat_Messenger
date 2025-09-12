@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
-      ASPNETCORE_URLS: ${ASPNETCORE_URLS}        # например http://0.0.0.0:8080
+      ASPNETCORE_URLS: ${ASPNETCORE_URLS}
       ConnectionStrings__DefaultConnection: ${ConnectionStrings__DefaultConnection}
       Jwt__Key: ${Jwt__Key}
       Jwt__Audience: ${Jwt__Audience}
@@ -30,29 +30,41 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - avatars:/app/wwwroot/avatars            # API пишет сюда
+      - avatars:/app/wwwroot/avatars
     expose:
-      - "8080"                                   # доступно ТОЛЬКО в сети докера
+      - "8080"
 
-  web:
+  # Одноразовая сборка фронта -> складываем /dist в том web_dist
+  web-build:
     build:
       context: ./WebClient
       dockerfile: Dockerfile
+      target: builder            # важное: берём build-стейдж
       args:
-        VITE_API_BASE: ${VITE_API_BASE}
-        VITE_HUB_URL: ${VITE_HUB_URL}
-    environment:
-      - DOMAIN=${DOMAIN}
-    depends_on: [ api ]
+        VITE_API_BASE: ${VITE_API_BASE}   # обычно /api
+        VITE_HUB_URL: ${VITE_HUB_URL}     # обычно /chatHub
+    volumes:
+      - web_dist:/out
+    command: sh -lc 'rm -rf /out/* && cp -a /app/dist/. /out/'
+    restart: "no"
+
+  # Выделенный nginx (reverse-proxy + раздача статики)
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+      - web-build
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
     volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - certbot-www:/var/www/certbot
       - letsencrypt:/etc/letsencrypt
       - avatars:/var/www/avatars:ro
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-
+      - web_dist:/usr/share/nginx/html:ro
 
   certbot:
     image: certbot/certbot:latest
@@ -70,3 +82,4 @@ volumes:
   certbot-www:
   pgdata:
   avatars:
+  web_dist:
