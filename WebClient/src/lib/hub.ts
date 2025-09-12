@@ -17,7 +17,7 @@ export type PresencePayload = { userId: number; isOnline: boolean; lastSeenUtc?:
 
 /** Фабрика хаба */
 export function createHub(getToken: () => string | null) {
-    const HUB_URL = import.meta.env.VITE_HUB_URL ?? "/chathub";
+    const HUB_URL = import.meta.env.VITE_HUB_URL ?? "/chatHub";
     const connection = new signalR.HubConnectionBuilder()
         // ВАЖНО: регистр! сервер мапит /chatHub
         .withUrl(HUB_URL, { accessTokenFactory: () => getToken() ?? "" })
