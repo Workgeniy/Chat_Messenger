@@ -11,6 +11,7 @@ import SecureImg from "../common/SecureImg";
 import LinkifiedText from "../common/LinkifiedText";
 import MembersModal from "../Chats/MembersModal";
 import type { Participant as ApiParticipant} from "../../lib/api";
+import {toSafeImgUrl} from "../../lib/url";
 
 /** ----- Types ----- */
 type MsgWithPlain = Msg & { plaintext?: string };
@@ -393,16 +394,16 @@ export default function ChatWindow(props: Props) {
             const others = (members ?? []).filter(u => u.id !== userId);
             const seenCount = others.filter(u => (u.lastSeenMessageId ?? 0) >= m.id).length;
 
-            const avatarSrc =
-                mine ? (props.myAvatarUrl ?? sender?.avatarUrl ?? undefined)
-                    : (sender?.avatarUrl ?? undefined);
+            const rawAvatar = mine
+               ? (props.myAvatarUrl ?? sender?.avatarUrl)
+                   : sender?.avatarUrl;
+            const avatarSrc = toSafeImgUrl(rawAvatar);
             const avatarSeed = mine ? "Me" : (sender?.name || "U");
 
             return (
                 <div key={`msg:${m.id}`} className={`${styles.msgRow} ${mine ? styles.rowMine : styles.rowTheir}`}>
                     {/* аватар возле пузыря */}
-                    <SecureImg
-                        src={avatarSrc}
+                    <SecureImg src={avatarSrc}
                         alt=""
                         className={styles.msgAvatar}
                         fallback={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(avatarSeed)}`}
@@ -580,7 +581,7 @@ export default function ChatWindow(props: Props) {
 
                         {avatarUrl && (
                             <SecureImg
-                                src={avatarUrl}
+                                src={toSafeImgUrl(avatarUrl)}
                                 alt=""
                                 style={{width: 32, height: 32, borderRadius: "50%"}}
                                 fallback={`https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(title || "U")}`}

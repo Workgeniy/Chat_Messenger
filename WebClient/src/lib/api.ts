@@ -4,6 +4,7 @@ import {
     tryDecryptFrom,
     selfTestE2EE, encryptForGroup,
 } from "./crypto";
+import {toSafeImgUrl} from "./url";
 
 export type Chat = {
     id: number;
@@ -284,12 +285,6 @@ export const api = {
         return res.json();
     },
 
-    // uploadChatAvatar: (chatId: number, file: File) => {
-    //     const form = new FormData();
-    //     form.append("file", file);
-    //     return http<{ avatarUrl: string }>(`/chats/${chatId}/avatar`, { method: "POST", body: form });
-    // },
-
     //  регистрация с логином
     async register(login: string, name: string, email: string | null, password: string): Promise<RegisterResp> {
         const res = await fetch(`${API}/auth/register`, {
@@ -333,16 +328,14 @@ export const api = {
 
 
 
-    async uploadChatAvatar(chatId: number, file: File) {
+    async uploadChatAvatar( file: File) {
         const form = new FormData();
         form.append('file', file);
         form.append('avatar', file);
-        const res = await authFetch(`${API}/chats/${chatId}/avatar`, {
-            method: 'POST',
-            body: form,
-        });
+        const res = await authFetch(`${API}/users/me/avatar`, { method: 'POST', body: form });
         if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
-        return res.json() as Promise<{ avatarUrl: string }>;
+        const data = await res.json() as { avatarUrl: string };
+        return { ...data, avatarUrl: toSafeImgUrl(data.avatarUrl) ?? data.avatarUrl };
     },
 
     me: () => http<MeDto>("/users/me"),
