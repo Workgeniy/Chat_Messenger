@@ -11,18 +11,13 @@
 /* фиксированная высота всей карточки — ничего не «подскакивает» */
 .card {
     width: min(520px, calc(100vw - 32px));
-    max-height: min(80vh, 560px);   /* ограничиваем карточку по высоте */
-    overflow: auto;                  /* <- скролл теперь у карточки, не у списка */
-    overscroll-behavior: contain;    /* чтобы не «пробивался» скролл заднего плана */
-
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0,0,0,.25);
-    padding: 16px;
-
+    max-width: 100%;
+    /* фикс высоты карточки: не дергается */
+    max-height: min(80vh, 640px);
     display: grid;
-    grid-template-rows: auto auto auto auto; /* убираем 1fr, список не фиксируем */
+    grid-template-rows: auto auto minmax(320px, 1fr) auto; /* список всегда занимает одинаковую «строку» */
     gap: 12px;
+    overflow: hidden;
 }
 
 .input {
@@ -35,11 +30,13 @@
 
 /* список всегда одного «слота» высоты; скролл — всегда видимый/стабильный */
 /* список больше не скроллится сам */
-.list {
-    overflow: visible;
-    padding-right: 0;         /* резерв под полосу больше не нужен */
-    min-height: 0;            /* на случай редких браузерных артефактов с grid */
-    /* scrollbar-gutter больше не нужен */
+.list{
+    /* ключ: собственный скролл у списка */
+    overflow-y: auto;
+    min-height: 320px;      /* фиксируем стартовую высоту, чтобы на «Ищем…»/«Ничего нет» не прыгало */
+    /* чтобы появление полосы не двигало контент (в поддерживаемых браузерах) */
+    scrollbar-gutter: stable both-edges;
+    padding-right: 6px;
 }
 
 /* ровные строки фикс-высоты */
